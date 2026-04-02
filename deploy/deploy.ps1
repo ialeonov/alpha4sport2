@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "root@5077857-hk09213",
+    [string]$Server = "root@109.196.102.140",
     [string]$ServerProjectPath = "/opt/alpha4sport",
     [string]$ServerFrontendPath = "/var/www/fit.ileonov.ru",
     [string]$Branch = "main",
