@@ -361,6 +361,8 @@ class ProgressionService:
             )
 
         for record in record_events:
+            if record.record_type == 'pr_volume':
+                continue
             value_str = f'{record.value:g} кг'
             events.log_once(
                 user_id=user_id,
