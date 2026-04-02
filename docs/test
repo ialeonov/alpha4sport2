@@ -9,5 +9,7 @@ UPLOAD_DIR=/app/uploads
 
 git remote add origin git@github.com:ialeonov/alpha4sport2.git
 ssh-keygen -t ed25519 -C "ialeonov@gmail.com"
-git remote set-url origin https://github.com/ialeonov/alpha4sport2.git
-git push -u origin main
+
+.\deploy\deploy.ps1 -SkipFlutterBuild -SkipFrontendUpload
+.\deploy\deploy.ps1 -SkipBackendDeploy
+
