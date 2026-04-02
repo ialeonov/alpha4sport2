@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Календарь — единый экран</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0c0d10;
+  --surface:   #13141a;
+  --surface2:  #1a1b24;
+  --surface3:  #22232e;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+  --text:      #dde0f0;
+  --muted:     #4a4d6a;
+  --muted2:    #6b6e90;
+
+  --acc:       #e8501a;
+  --acc2:      #ff7a3d;
+  --acc-glow:  rgba(232,80,26,0.3);
+
+  /* heatmap intensity colours */
+  --h0: transparent;
+  --h1: rgba(232,80,26,0.18);
+  --h2: rgba(232,80,26,0.38);
+  --h3: rgba(232,80,26,0.62);
+  --h4: rgba(232,80,26,0.88);
+
+  --select-bg: rgba(58,127,255,0.18);
+  --select-border: rgba(58,127,255,0.55);
+  --blue: #4a8fff;
+  --blue2: #82b4ff;
+
+  --panel-w: 340px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ═══════════════════════════════════════════
+   TOP BAR
+═══════════════════════════════════════════ */
+.topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 20px;
+  height: 58px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.logo {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--acc);
+  margin-right: 28px;
+}
+.tb-nav {
+  display: flex;
+  gap: 2px;
+}
+.tb-btn {
+  background: none; border: none;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px; font-weight: 500;
+  color: var(--muted2);
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all .18s;
+  letter-spacing: .2px;
+}
+.tb-btn:hover { color: var(--text); background: var(--surface2); }
+.tb-btn.active {
+  color: var(--text);
+  background: var(--surface3);
+}
+
+.tb-spacer { flex: 1; }
+
+/* mode toggle */
+.mode-toggle {
+  display: flex;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+  margin-right: 12px;
+}
+.mode-btn {
+  background: none; border: none;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--muted2);
+  padding: 5px 13px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all .18s;
+  text-transform: uppercase;
+}
+.mode-btn.active {
+  background: var(--acc);
+  color: #fff;
+  box-shadow: 0 2px 10px var(--acc-glow);
+}
+.mode-btn.active.select-mode {
+  background: var(--blue);
+  box-shadow: 0 2px 10px rgba(74,143,255,.35);
+}
+
+/* export action bar — shown in select mode */
+.export-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: rgba(74,143,255,.1);
+  border: 1px solid rgba(74,143,255,.3);
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--blue2);
+  margin-right: 12px;
+}
+.export-bar.visible { display: flex; }
+.export-bar-count { font-weight: 600; }
+.export-btn {
+  background: var(--blue);
+  border: none;
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px; font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: .3px;
+  transition: opacity .15s;
+}
+.export-btn:hover { opacity: .85; }
+
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--acc), var(--acc2));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #fff;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════ */
+.main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════
+   LEFT — CALENDAR PANE
+═══════════════════════════════════════════ */
+.cal-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 20px 0;
+  transition: padding-right .35s cubic-bezier(.4,0,.2,1);
+}
+.cal-pane.panel-open { padding-right: 0; }
+
+/* month nav */
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-shrink: 0;
+}
+.month-arrow {
+  width: 30px; height: 30px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--muted2);
+  font-size: 13px;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.month-arrow:hover { background: var(--surface3); color: var(--text); }
+
+.month-title {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--text);
+}
+.month-year {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--muted2);
+  margin-left: 2px;
+}
+
+.month-stats {
+  margin-left: auto;
+  display: flex;
+  gap: 20px;
+}
+.mstat {
+  text-align: right;
+  font-family: 'DM Mono', monospace;
+}
+.mstat-val { font-size: 16px; font-weight: 500; color: var(--text); }
+.mstat-label { font-size: 9px; color: var(--muted2); letter-spacing: .8px; text-transform: uppercase; }
+
+/* weekday headers */
+.weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+.wd {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.wd.weekend { color: rgba(232,80,26,.5); }
+
+/* calendar grid */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  flex: 1;
+  align-content: start;
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+
+.day-cell {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 7px 4px 5px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .15s, transform .12s, box-shadow .15s;
+  user-select: none;
+  overflow: hidden;
+}
+.day-cell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity .15s;
+  background: rgba(255,255,255,.04);
+}
+.day-cell:hover::after { opacity: 1; }
+.day-cell:hover { border-color: var(--border2); }
+.day-cell:active { transform: scale(.96); }
+
+.day-cell.empty { background: transparent; border-color: transparent; cursor: default; }
+.day-cell.empty::after { display: none; }
+.day-cell.other-month { opacity: .3; }
+
+/* heatmap fill */
+.day-cell.h1 { background: var(--h1); border-color: rgba(232,80,26,.2); }
+.day-cell.h2 { background: var(--h2); border-color: rgba(232,80,26,.3); }
+.day-cell.h3 { background: var(--h3); border-color: rgba(232,80,26,.45); }
+.day-cell.h4 { background: var(--h4); border-color: rgba(232,80,26,.6); }
+
+.day-cell.today {
+  border-color: var(--acc) !important;
+  box-shadow: 0 0 0 1px var(--acc), inset 0 0 12px rgba(232,80,26,.12);
+}
+.day-cell.selected-day {
+  background: var(--select-bg) !important;
+  border-color: var(--select-border) !important;
+  box-shadow: 0 0 0 1px var(--select-border);
+}
+.day-cell.active-day {
+  border-color: var(--acc2) !important;
+  box-shadow: 0 0 0 1px var(--acc2), 0 4px 16px var(--acc-glow);
+  transform: scale(1.04);
+  z-index: 2;
+}
+
+.dn {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1;
+  margin-bottom: 4px;
+  z-index: 1;
+}
+.day-cell.today .dn { color: var(--acc); font-weight: 700; }
+.day-cell.selected-day .dn { color: var(--blue2); }
+
+/* dots = workouts */
+.dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  z-index: 1;
+  max-width: 30px;
+}
+.dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.45);
+}
+.h3 .dot, .h4 .dot { background: rgba(255,255,255,.7); }
+
+/* ═══════════════════════════════════════════
+   WEEK HEATMAP STRIP (bottom of cal pane)
+═══════════════════════════════════════════ */
+.week-strip {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 12px 0 14px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.week-strip-label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  margin-right: 4px;
+  padding-bottom: 4px;
+}
+
+.wbar-wrap {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+.wbar-day {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.wbar-label {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.wbar {
+  width: 100%;
+  background: var(--surface2);
+  border-radius: 4px 4px 3px 3px;
+  position: relative;
+  min-height: 4px;
+  overflow: hidden;
+}
+.wbar-fill {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  border-radius: 3px;
+  background: linear-gradient(to top, var(--acc), var(--acc2));
+  transition: height .5s cubic-bezier(.4,0,.2,1);
+}
+.wbar-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--muted2);
+}
+
+/* ═══════════════════════════════════════════
+   RIGHT — DETAIL PANEL
+═══════════════════════════════════════════ */
+.detail-panel {
+  width: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  transition: width .32s cubic-bezier(.4,0,.2,1), border-color .32s;
+  flex-shrink: 0;
+}
+.detail-panel.open {
+  width: var(--panel-w);
+  border-color: var(--border);
+}
+
+.panel-inner {
+  width: var(--panel-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  flex-shrink: 0;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.panel-date {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.panel-day-num {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--acc);
+  line-height: 1;
+}
+.panel-day-name {
+  font-size: 12px;
+  color: var(--muted2);
+  letter-spacing: .5px;
+  text-transform: capitalize;
+}
+.panel-close {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--muted2);
+  font-size: 14px;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.panel-close:hover { color: var(--text); background: var(--surface3); }
+
+.panel-day-stats {
+  display: flex;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pstat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pstat-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+.pstat-label {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
+.panel-workouts {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface3) transparent;
+}
+
+.workout-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all .18s;
+  position: relative;
+  overflow: hidden;
+}
+.workout-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--acc);
+  border-radius: 12px 0 0 12px;
+}
+.workout-card:hover { background: var(--surface3); transform: translateX(3px); border-color: var(--border2); }
+
+.wc-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.wc-icon {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  background: rgba(232,80,26,.12);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.wc-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; line-height: 1.3; }
+.wc-time { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted2); padding-top: 1px; }
+
+.wc-metrics { display: flex; gap: 12px; flex-wrap: wrap; }
+.wm { display: flex; align-items: baseline; gap: 2px; }
+.wm-val { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; color: var(--text); }
+.wm-unit { font-size: 9px; color: var(--muted2); text-transform: uppercase; letter-spacing: .4px; }
+
+.wc-open {
+  width: 100%;
+  margin-top: 10px;
+  background: rgba(232,80,26,.1);
+  border: 1px solid rgba(232,80,26,.2);
+  border-radius: 7px;
+  padding: 6px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px; font-weight: 500;
+  color: var(--acc2);
+  cursor: pointer;
+  transition: all .15s;
+  letter-spacing: .3px;
+}
+.wc-open:hover { background: rgba(232,80,26,.2); }
+
+.panel-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 20px;
+  text-align: center;
+}
+.panel-empty-icon { font-size: 28px; opacity: .4; }
+
+.add-workout-btn {
+  width: calc(100% - 32px);
+  margin: 0 16px 16px;
+  flex-shrink: 0;
+  background: rgba(232,80,26,.1);
+  border: 1px dashed rgba(232,80,26,.3);
+  border-radius: 10px;
+  padding: 10px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px; font-weight: 500;
+  color: rgba(232,80,26,.7);
+  cursor: pointer;
+  transition: all .15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.add-workout-btn:hover { background: rgba(232,80,26,.18); color: var(--acc2); border-color: rgba(232,80,26,.5); }
+
+/* ═══════════════════════════════════════════
+   HEATMAP LEGEND
+═══════════════════════════════════════════ */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.legend-label { font-size: 9px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
+.legend-box {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+/* ═══════════════════════════════════════════
+   TOOLTIP
+═══════════════════════════════════════════ */
+.tooltip {
+  position: fixed;
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity .1s;
+  white-space: nowrap;
+}
+.tooltip.show { opacity: 1; }
+
+/* select mode hint */
+.select-hint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(74,143,255,.15);
+  border: 1px solid rgba(74,143,255,.3);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 11px;
+  color: var(--blue2);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+  white-space: nowrap;
+  z-index: 10;
+}
+.select-hint.show { opacity: 1; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <div class="logo">A4S</div>
+  <div class="tb-nav">
+    <button class="tb-btn active">Календарь</button>
+    <button class="tb-btn">Статистика</button>
+    <button class="tb-btn">Профиль</button>
+  </div>
+  <div class="tb-spacer"></div>
+
+  <div class="export-bar" id="exportBar">
+    <span>Выбрано: <span class="export-bar-count" id="selCount">0</span> дней</span>
+    <button class="export-btn" onclick="exportRange()">Экспорт</button>
+  </div>
+
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="btnView" onclick="setMode('view')">Просмотр</button>
+    <button class="mode-btn" id="btnSelect" onclick="setMode('select')">Выбор дат</button>
+  </div>
+
+  <div class="avatar">АК</div>
+</header>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- CALENDAR PANE -->
+  <div class="cal-pane" id="calPane">
+
+    <!-- Month nav -->
+    <div class="month-nav">
+      <div class="month-arrow" onclick="changeMonth(-1)">‹</div>
+      <div>
+        <span class="month-title" id="monthTitle">Март</span>
+        <span class="month-year" id="monthYear">2026</span>
+      </div>
+      <div class="month-arrow" onclick="changeMonth(1)">›</div>
+      <div class="month-stats" id="monthStats"></div>
+      <div class="legend">
+        <span class="legend-label">Нагрузка</span>
+        <div class="legend-box" style="background:var(--h1)"></div>
+        <div class="legend-box" style="background:var(--h2)"></div>
+        <div class="legend-box" style="background:var(--h3)"></div>
+        <div class="legend-box" style="background:var(--h4)"></div>
+      </div>
+    </div>
+
+    <!-- Weekdays -->
+    <div class="weekdays">
+      <div class="wd">Пн</div><div class="wd">Вт</div><div class="wd">Ср</div>
+      <div class="wd">Чт</div><div class="wd">Пт</div>
+      <div class="wd weekend">Сб</div><div class="wd weekend">Вс</div>
+    </div>
+
+    <!-- Grid -->
+    <div class="cal-grid" id="calGrid"></div>
+
+    <!-- Week heatmap strip -->
+    <div class="week-strip" id="weekStrip">
+      <span class="week-strip-label">Эта неделя</span>
+      <div class="wbar-wrap" id="wbarWrap"></div>
+    </div>
+
+    <!-- Select mode hint -->
+    <div class="select-hint" id="selectHint">Кликните и перетащите для выбора диапазона</div>
+
+  </div>
+
+  <!-- DETAIL PANEL -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="panel-inner">
+      <div class="panel-header">
+        <div class="panel-date">
+          <div class="panel-day-num" id="panelDayNum">28</div>
+          <div class="panel-day-name" id="panelDayName">пятница, март</div>
+        </div>
+        <div class="panel-close" onclick="closePanel()">✕</div>
+      </div>
+      <div class="panel-day-stats" id="panelDayStats"></div>
+      <div class="panel-workouts" id="panelWorkouts"></div>
+      <button class="add-workout-btn">+ Добавить тренировку</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ══════════════════════════════════════════
+//  DATA
+// ══════════════════════════════════════════
+const WORKOUTS = {
+  // March 2026
+  '2026-3-2':  [{ icon:'🏃', name:'Пробежка — лёгкий темп', time:'07:30', metrics:[{v:'8.2',u:'км'},{v:'5:30',u:'мин/км'},{v:'138',u:'уд/мин'}] }],
+  '2026-3-4':  [{ icon:'🏋️', name:'Силовая — ноги', time:'19:00', metrics:[{v:'5',u:'упр'},{v:'4 100',u:'кг объём'}] }, { icon:'🧘', name:'Стретчинг', time:'20:30', metrics:[{v:'20',u:'мин'}] }],
+  '2026-3-5':  [{ icon:'🏊', name:'Плавание — базовый объём', time:'08:00', metrics:[{v:'2 000',u:'м'},{v:'48',u:'мин'}] }],
+  '2026-3-7':  [{ icon:'🏃', name:'Интервальный бег', time:'08:00', metrics:[{v:'10.5',u:'км'},{v:'4:48',u:'мин/км'},{v:'162',u:'уд/мин'}] }],
+  '2026-3-9':  [{ icon:'🚴', name:'Велотренировка — выносливость', time:'17:30', metrics:[{v:'45',u:'км'},{v:'1:42',u:'ч'}] }],
+  '2026-3-11': [{ icon:'🏋️', name:'Силовая — грудь/трицепс', time:'19:00', metrics:[{v:'6',u:'упр'},{v:'4 820',u:'кг объём'}] }],
+  '2026-3-12': [{ icon:'🏃', name:'Длинный бег — 16 км', time:'09:00', metrics:[{v:'16.1',u:'км'},{v:'5:12',u:'мин/км'},{v:'144',u:'уд/мин'}] }],
+  '2026-3-14': [{ icon:'🏃', name:'Восстановительный бег', time:'07:30', metrics:[{v:'7.4',u:'км'},{v:'5:55',u:'мин/км'}] }],
+  '2026-3-16': [{ icon:'🚴', name:'Интервалы на велосипеде', time:'18:00', metrics:[{v:'6×3',u:'интервалы'},{v:'38',u:'мин'}] }],
+  '2026-3-18': [{ icon:'🏋️', name:'Силовая — спина/бицепс', time:'19:30', metrics:[{v:'5',u:'упр'},{v:'3 960',u:'кг объём'}] }],
+  '2026-3-19': [{ icon:'🏊', name:'Плавание — интервалы', time:'08:30', metrics:[{v:'1 800',u:'м'},{v:'42',u:'мин'}] }],
+  '2026-3-21': [{ icon:'🏃', name:'Пробежка — парк', time:'07:00', metrics:[{v:'12.4',u:'км'},{v:'5:08',u:'мин/км'},{v:'148',u:'уд/мин'}] }],
+  '2026-3-23': [{ icon:'🚴', name:'Велопрогулка — восстановление', time:'16:00', metrics:[{v:'28',u:'км'},{v:'1:10',u:'ч'}] }],
+  '2026-3-25': [{ icon:'🏃', name:'Утренняя пробежка', time:'07:15', metrics:[{v:'12.4',u:'км'},{v:'5:08',u:'мин/км'}] }],
+  '2026-3-26': [{ icon:'🏋️', name:'Силовая — грудь/трицепс', time:'19:00', metrics:[{v:'6',u:'упр'},{v:'4 820',u:'кг объём'}] }],
+  '2026-3-28': [{ icon:'🚴', name:'Велотренировка — интервальная', time:'18:30', metrics:[{v:'45',u:'мин'},{v:'6×3',u:'интервалы'}] }],
+};
+
+// intensity 0-4 per day
+const INTENSITY = {
+  '2026-3-2':1,'2026-3-4':3,'2026-3-5':2,'2026-3-7':3,'2026-3-9':2,
+  '2026-3-11':2,'2026-3-12':4,'2026-3-14':2,'2026-3-16':3,'2026-3-18':2,
+  '2026-3-19':2,'2026-3-21':4,'2026-3-23':1,'2026-3-25':3,'2026-3-26':3,'2026-3-28':2,
+};
+
+const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const DAYS_RU = ['Понедельник','Вторник','Среда','Четверг','Пятница','Суббота','Воскресенье'];
+const DAYS_SHORT = ['пн','вт','ср','чт','пт','сб','вс'];
+
+let currentYear = 2026, currentMonth = 3;
+let mode = 'view'; // 'view' | 'select'
+let selectedDays = new Set();
+let activeDay = null;
+let isDragging = false;
+
+// ══════════════════════════════════════════
+//  RENDER CALENDAR
+// ══════════════════════════════════════════
+function renderCalendar() {
+  const grid = document.getElementById('calGrid');
+  grid.innerHTML = '';
+  document.getElementById('monthTitle').textContent = MONTHS_RU[currentMonth-1];
+  document.getElementById('monthYear').textContent = currentYear;
+
+  const firstDay = new Date(currentYear, currentMonth-1, 1);
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  // Monday-first: 0=Mon..6=Sun
+  let startDow = (firstDay.getDay() + 6) % 7;
+
+  // empty cells
+  for (let i = 0; i < startDow; i++) {
+    const el = document.createElement('div');
+    el.className = 'day-cell empty';
+    grid.appendChild(el);
+  }
+
+  const today = new Date();
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${currentYear}-${currentMonth}-${d}`;
+    const intensity = INTENSITY[key] || 0;
+    const workouts = WORKOUTS[key] || [];
+    const isToday = today.getFullYear()===currentYear && today.getMonth()+1===currentMonth && today.getDate()===d;
+
+    const cell = document.createElement('div');
+    let cls = 'day-cell';
+    if (intensity > 0) cls += ` h${intensity}`;
+    if (isToday) cls += ' today';
+    if (selectedDays.has(key)) cls += ' selected-day';
+    if (activeDay === key) cls += ' active-day';
+    cell.className = cls;
+    cell.dataset.key = key;
+    cell.dataset.day = d;
+
+    const dn = document.createElement('div');
+    dn.className = 'dn';
+    dn.textContent = d;
+    cell.appendChild(dn);
+
+    if (workouts.length) {
+      const dots = document.createElement('div');
+      dots.className = 'dots';
+      workouts.forEach(() => {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        dots.appendChild(dot);
+      });
+      cell.appendChild(dots);
+    }
+
+    // events
+    cell.addEventListener('mousedown', e => onDayMouseDown(e, key));
+    cell.addEventListener('mouseenter', e => onDayMouseEnter(e, key));
+    cell.addEventListener('mouseover', e => showTooltip(e, key, workouts));
+    cell.addEventListener('mouseleave', hideTooltip);
+
+    grid.appendChild(cell);
+  }
+
+  renderMonthStats();
+  renderWeekStrip();
+}
+
+// ══════════════════════════════════════════
+//  MONTH STATS
+// ══════════════════════════════════════════
+function renderMonthStats() {
+  const prefix = `${currentYear}-${currentMonth}-`;
+  const keys = Object.keys(WORKOUTS).filter(k => k.startsWith(prefix));
+  let totalWorkouts = 0;
+  keys.forEach(k => totalWorkouts += WORKOUTS[k].length);
+
+  const el = document.getElementById('monthStats');
+  el.innerHTML = `
+    <div class="mstat"><div class="mstat-val">${keys.length}</div><div class="mstat-label">Дней</div></div>
+    <div class="mstat"><div class="mstat-val">${totalWorkouts}</div><div class="mstat-label">Тренировок</div></div>
+  `;
+}
+
+// ══════════════════════════════════════════
+//  WEEK HEATMAP STRIP
+// ══════════════════════════════════════════
+function renderWeekStrip() {
+  // show current week Mon-Sun
+  const today = new Date(2026, 2, 28); // March 28 2026
+  const dow = (today.getDay() + 6) % 7; // 0=Mon
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - dow);
+
+  const wrap = document.getElementById('wbarWrap');
+  wrap.innerHTML = '';
+
+  const maxH = 44;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const key = `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    const intensity = INTENSITY[key] || 0;
+    const isToday = d.getDate() === 28 && d.getMonth() === 2;
+
+    const col = document.createElement('div');
+    col.className = 'wbar-day';
+
+    const val = document.createElement('div');
+    val.className = 'wbar-val';
+    val.textContent = intensity ? `${intensity*25}%` : '—';
+
+    const bar = document.createElement('div');
+    bar.className = 'wbar';
+    bar.style.height = maxH + 'px';
+    if (isToday) bar.style.border = '1px solid rgba(232,80,26,.4)';
+
+    const fill = document.createElement('div');
+    fill.className = 'wbar-fill';
+    fill.style.height = '0';
+    bar.appendChild(fill);
+    setTimeout(() => { fill.style.height = (intensity / 4 * 100) + '%'; }, 100 + i * 50);
+
+    const label = document.createElement('div');
+    label.className = 'wbar-label';
+    label.textContent = DAYS_SHORT[i];
+    if (isToday) label.style.color = 'var(--acc)';
+
+    col.appendChild(val);
+    col.appendChild(bar);
+    col.appendChild(label);
+    wrap.appendChild(col);
+  }
+}
+
+// ══════════════════════════════════════════
+//  INTERACTIONS — VIEW MODE
+// ══════════════════════════════════════════
+function onDayMouseDown(e, key) {
+  if (mode === 'select') {
+    isDragging = true;
+    selectedDays.clear();
+    selectedDays.add(key);
+    renderCalendar();
+    updateExportBar();
+    e.preventDefault();
+  } else {
+    openDay(key);
+  }
+}
+
+function onDayMouseEnter(e, key) {
+  if (mode === 'select' && isDragging) {
+    selectedDays.add(key);
+    renderCalendar();
+    updateExportBar();
+  }
+}
+
+document.addEventListener('mouseup', () => { isDragging = false; });
+
+function openDay(key) {
+  activeDay = key;
+  renderCalendar();
+
+  const parts = key.split('-');
+  const d = parseInt(parts[2]);
+  const date = new Date(parseInt(parts[0]), parseInt(parts[1])-1, d);
+  const dowIdx = (date.getDay() + 6) % 7;
+
+  document.getElementById('panelDayNum').textContent = d;
+  document.getElementById('panelDayName').textContent =
+    DAYS_RU[dowIdx].toLowerCase() + ', ' + MONTHS_RU[parseInt(parts[1])-1].toLowerCase();
+
+  const workouts = WORKOUTS[key] || [];
+  const intensity = INTENSITY[key] || 0;
+
+  // day stats
+  const statsEl = document.getElementById('panelDayStats');
+  if (workouts.length) {
+    statsEl.innerHTML = `
+      <div class="pstat"><div class="pstat-val">${workouts.length}</div><div class="pstat-label">Тренировок</div></div>
+      <div class="pstat"><div class="pstat-val">${['—','Лёгкая','Умеренная','Высокая','Макс'][intensity]}</div><div class="pstat-label">Нагрузка</div></div>
+    `;
+    statsEl.style.display = 'flex';
+  } else {
+    statsEl.style.display = 'none';
+  }
+
+  // workouts list
+  const listEl = document.getElementById('panelWorkouts');
+  listEl.innerHTML = '';
+
+  if (!workouts.length) {
+    listEl.innerHTML = `<div class="panel-empty"><div class="panel-empty-icon">○</div><div>Нет тренировок</div></div>`;
+  } else {
+    workouts.forEach(w => {
+      const card = document.createElement('div');
+      card.className = 'workout-card';
+      card.innerHTML = `
+        <div class="wc-top">
+          <div class="wc-icon">${w.icon}</div>
+          <div class="wc-name">${w.name}</div>
+          <div class="wc-time">${w.time}</div>
+        </div>
+        <div class="wc-metrics">${w.metrics.map(m=>`<div class="wm"><span class="wm-val">${m.v}</span><span class="wm-unit">${m.u}</span></div>`).join('')}</div>
+        <button class="wc-open">Открыть →</button>
+      `;
+      listEl.appendChild(card);
+    });
+  }
+
+  const panel = document.getElementById('detailPanel');
+  panel.classList.add('open');
+  document.getElementById('calPane').classList.add('panel-open');
+}
+
+function closePanel() {
+  activeDay = null;
+  document.getElementById('detailPanel').classList.remove('open');
+  document.getElementById('calPane').classList.remove('panel-open');
+  renderCalendar();
+}
+
+// ══════════════════════════════════════════
+//  MODE TOGGLE
+// ══════════════════════════════════════════
+function setMode(m) {
+  mode = m;
+  document.getElementById('btnView').classList.toggle('active', m === 'view');
+  document.getElementById('btnSelect').classList.toggle('active', m === 'select');
+  document.getElementById('btnSelect').classList.toggle('select-mode', m === 'select');
+  document.getElementById('selectHint').classList.toggle('show', m === 'select');
+
+  if (m === 'view') {
+    selectedDays.clear();
+    document.getElementById('exportBar').classList.remove('visible');
+  }
+  if (m === 'select') {
+    closePanel();
+  }
+  renderCalendar();
+}
+
+function updateExportBar() {
+  const bar = document.getElementById('exportBar');
+  const count = selectedDays.size;
+  if (count > 0) {
+    bar.classList.add('visible');
+    document.getElementById('selCount').textContent = count;
+  } else {
+    bar.classList.remove('visible');
+  }
+}
+
+function exportRange() {
+  const sorted = [...selectedDays].sort();
+  alert(`Экспорт ${sorted.length} дней:\n${sorted[0]} → ${sorted[sorted.length-1]}`);
+}
+
+// ══════════════════════════════════════════
+//  MONTH NAV
+// ══════════════════════════════════════════
+function changeMonth(dir) {
+  currentMonth += dir;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  if (currentMonth < 1)  { currentMonth = 12; currentYear--; }
+  closePanel();
+  selectedDays.clear();
+  renderCalendar();
+}
+
+// ══════════════════════════════════════════
+//  TOOLTIP
+// ══════════════════════════════════════════
+function showTooltip(e, key, workouts) {
+  if (!workouts.length) return;
+  const tip = document.getElementById('tooltip');
+  tip.textContent = workouts.map(w => w.name).join(' · ');
+  tip.classList.add('show');
+  moveTip(e);
+}
+document.addEventListener('mousemove', e => {
+  const tip = document.getElementById('tooltip');
+  if (tip.classList.contains('show')) moveTip(e);
+});
+function moveTip(e) {
+  const tip = document.getElementById('tooltip');
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top = (e.clientY - 30) + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('show');
+}
+
+// ══════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════
+renderCalendar();
+// auto-open today
+setTimeout(() => openDay('2026-3-28'), 300);
+</script>
+</body>
+</html>

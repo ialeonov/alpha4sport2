@@ -1,0 +1,25 @@
+.idea/
+.claude/
+.ai/
+
+# Python backend
+**/__pycache__/
+**/*.py[cod]
+backend/.env
+backend/uploads/
+backend/data/
+
+# Local build and deployment artifacts
+deploy/.env
+*.log
+
+# Flutter frontend
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.pub-cache/
+frontend/build/
+
+# OS/editor files
+.DS_Store
+Thumbs.db

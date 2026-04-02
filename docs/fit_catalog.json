@@ -1,0 +1,451 @@
+{
+  "exercises": [
+    {
+      "name": "Жим лежа",
+      "slug": "bench_press",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["трицепс", "передние_дельты", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим гантелей лежа",
+      "slug": "dumbbell_bench_press",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["трицепс", "передние_дельты", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим штанги на наклонной скамье",
+      "slug": "incline_barbell_press",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["передние_дельты", "трицепс", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим гантелей на наклонной скамье",
+      "slug": "incline_dumbbell_press",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["передние_дельты", "трицепс", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Сведения в тренажере бабочка",
+      "slug": "pec_deck_fly",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["передние_дельты"],
+      "equipment": "тренажер",
+      "movement_pattern": "сведение",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Кроссовер",
+      "slug": "cable_crossover",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["передние_дельты", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "сведение",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Отжимания от пола",
+      "slug": "push_up",
+      "primary_muscle": "грудь",
+      "secondary_muscles": ["трицепс", "передние_дельты", "кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+
+    {
+      "name": "Подтягивания широким хватом",
+      "slug": "wide_grip_pull_up",
+      "primary_muscle": "широчайшие",
+      "secondary_muscles": ["бицепс", "задние_дельты", "трапеции", "кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "вертикальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Подтягивания обратным хватом",
+      "slug": "chin_up",
+      "primary_muscle": "широчайшие",
+      "secondary_muscles": ["бицепс", "задние_дельты", "кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "вертикальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Тяга верхнего блока к груди",
+      "slug": "lat_pulldown",
+      "primary_muscle": "широчайшие",
+      "secondary_muscles": ["бицепс", "задние_дельты", "трапеции", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "вертикальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Тяга горизонтального блока",
+      "slug": "seated_cable_row",
+      "primary_muscle": "спина",
+      "secondary_muscles": ["широчайшие", "бицепс", "задние_дельты", "трапеции", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "горизонтальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Тяга штанги в наклоне",
+      "slug": "barbell_row",
+      "primary_muscle": "спина",
+      "secondary_muscles": ["широчайшие", "задние_дельты", "бицепс", "трапеции", "поясница", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "горизонтальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Тяга гантели одной рукой",
+      "slug": "one_arm_dumbbell_row",
+      "primary_muscle": "широчайшие",
+      "secondary_muscles": ["спина", "бицепс", "задние_дельты", "трапеции", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "горизонтальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Тяга Т-грифа",
+      "slug": "t_bar_row",
+      "primary_muscle": "спина",
+      "secondary_muscles": ["широчайшие", "бицепс", "задние_дельты", "трапеции", "поясница", "кор"],
+      "equipment": "тренажер",
+      "movement_pattern": "горизонтальная_тяга",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Шраги с гантелями",
+      "slug": "dumbbell_shrug",
+      "primary_muscle": "трапеции",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "другое",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Тяга каната к лицу",
+      "slug": "face_pull",
+      "primary_muscle": "задние_дельты",
+      "secondary_muscles": ["трапеции", "спина", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "горизонтальная_тяга",
+      "exercise_type": "изоляция"
+    },
+
+    {
+      "name": "Жим штанги стоя",
+      "slug": "overhead_press",
+      "primary_muscle": "передние_дельты",
+      "secondary_muscles": ["трицепс", "средние_дельты", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "вертикальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим гантелей сидя",
+      "slug": "seated_dumbbell_press",
+      "primary_muscle": "передние_дельты",
+      "secondary_muscles": ["средние_дельты", "трицепс", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "вертикальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим в тренажере на плечи",
+      "slug": "machine_shoulder_press",
+      "primary_muscle": "передние_дельты",
+      "secondary_muscles": ["средние_дельты", "трицепс", "кор"],
+      "equipment": "тренажер",
+      "movement_pattern": "вертикальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Махи гантелями в стороны",
+      "slug": "dumbbell_lateral_raise",
+      "primary_muscle": "средние_дельты",
+      "secondary_muscles": ["трапеции", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "подъем",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Махи в стороны в тренажере",
+      "slug": "machine_lateral_raise",
+      "primary_muscle": "средние_дельты",
+      "secondary_muscles": ["трапеции"],
+      "equipment": "тренажер",
+      "movement_pattern": "подъем",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Разведения гантелей в наклоне",
+      "slug": "rear_delt_fly",
+      "primary_muscle": "задние_дельты",
+      "secondary_muscles": ["трапеции", "спина", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "подъем",
+      "exercise_type": "изоляция"
+    },
+
+    {
+      "name": "Подъем штанги на бицепс",
+      "slug": "barbell_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Подъем EZ-штанги на бицепс",
+      "slug": "ez_bar_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "ez_штанга",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Подъем гантелей на бицепс",
+      "slug": "dumbbell_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Молотки",
+      "slug": "hammer_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Сгибание рук на скамье Скотта",
+      "slug": "preacher_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья"],
+      "equipment": "ez_штанга",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Сгибание рук в кроссовере",
+      "slug": "cable_curl",
+      "primary_muscle": "бицепс",
+      "secondary_muscles": ["предплечья", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+
+    {
+      "name": "Жим узким хватом",
+      "slug": "close_grip_bench_press",
+      "primary_muscle": "трицепс",
+      "secondary_muscles": ["грудь", "передние_дельты", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "горизонтальный_жим",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Французский жим лежа",
+      "slug": "lying_triceps_extension",
+      "primary_muscle": "трицепс",
+      "secondary_muscles": ["передние_дельты", "кор"],
+      "equipment": "ez_штанга",
+      "movement_pattern": "разгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Разгибание рук на блоке",
+      "slug": "triceps_pushdown",
+      "primary_muscle": "трицепс",
+      "secondary_muscles": ["передние_дельты", "кор"],
+      "equipment": "блок",
+      "movement_pattern": "разгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Разгибание руки из-за головы в кроссовере",
+      "slug": "overhead_cable_triceps_extension",
+      "primary_muscle": "трицепс",
+      "secondary_muscles": ["кор"],
+      "equipment": "блок",
+      "movement_pattern": "разгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Отжимания на брусьях",
+      "slug": "dips",
+      "primary_muscle": "трицепс",
+      "secondary_muscles": ["грудь", "передние_дельты", "кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "вертикальный_жим",
+      "exercise_type": "базовое"
+    },
+
+    {
+      "name": "Приседания со штангой",
+      "slug": "barbell_squat",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра", "поясница", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "приседание",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Приседания в Смите",
+      "slug": "smith_squat",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра", "кор"],
+      "equipment": "смита",
+      "movement_pattern": "приседание",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Жим ногами",
+      "slug": "leg_press",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра"],
+      "equipment": "тренажер",
+      "movement_pattern": "приседание",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Выпады с гантелями",
+      "slug": "dumbbell_lunge",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "выпад",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Болгарские сплит-приседания",
+      "slug": "bulgarian_split_squat",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра", "кор"],
+      "equipment": "гантели",
+      "movement_pattern": "выпад",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Разгибание ног в тренажере",
+      "slug": "leg_extension",
+      "primary_muscle": "квадрицепсы",
+      "secondary_muscles": [],
+      "equipment": "тренажер",
+      "movement_pattern": "разгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Сгибание ног лежа",
+      "slug": "lying_leg_curl",
+      "primary_muscle": "бицепс_бедра",
+      "secondary_muscles": ["икры"],
+      "equipment": "тренажер",
+      "movement_pattern": "сгибание",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Румынская тяга",
+      "slug": "romanian_deadlift",
+      "primary_muscle": "бицепс_бедра",
+      "secondary_muscles": ["ягодицы", "поясница", "кор", "предплечья"],
+      "equipment": "штанга",
+      "movement_pattern": "наклон",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Становая тяга",
+      "slug": "deadlift",
+      "primary_muscle": "спина",
+      "secondary_muscles": ["ягодицы", "бицепс_бедра", "трапеции", "поясница", "предплечья", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "наклон",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Ягодичный мост",
+      "slug": "hip_thrust",
+      "primary_muscle": "ягодицы",
+      "secondary_muscles": ["бицепс_бедра", "кор"],
+      "equipment": "штанга",
+      "movement_pattern": "наклон",
+      "exercise_type": "базовое"
+    },
+    {
+      "name": "Подъем на носки стоя",
+      "slug": "standing_calf_raise",
+      "primary_muscle": "икры",
+      "secondary_muscles": [],
+      "equipment": "тренажер",
+      "movement_pattern": "подъем",
+      "exercise_type": "изоляция"
+    },
+    {
+      "name": "Подъем на носки сидя",
+      "slug": "seated_calf_raise",
+      "primary_muscle": "икры",
+      "secondary_muscles": [],
+      "equipment": "тренажер",
+      "movement_pattern": "подъем",
+      "exercise_type": "изоляция"
+    },
+
+    {
+      "name": "Скручивания",
+      "slug": "crunch",
+      "primary_muscle": "пресс",
+      "secondary_muscles": ["кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "сгибание_корпуса",
+      "exercise_type": "кор"
+    },
+    {
+      "name": "Подъем ног в висе",
+      "slug": "hanging_leg_raise",
+      "primary_muscle": "пресс",
+      "secondary_muscles": ["кор"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "сгибание_корпуса",
+      "exercise_type": "кор"
+    },
+    {
+      "name": "Планка",
+      "slug": "plank",
+      "primary_muscle": "кор",
+      "secondary_muscles": ["пресс", "косые_мышцы", "поясница", "ягодицы"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "стабилизация_корпуса",
+      "exercise_type": "кор"
+    },
+    {
+      "name": "Боковая планка",
+      "slug": "side_plank",
+      "primary_muscle": "косые_мышцы",
+      "secondary_muscles": ["кор", "пресс"],
+      "equipment": "собственный_вес",
+      "movement_pattern": "стабилизация_корпуса",
+      "exercise_type": "кор"
+    }
+  ]
+}

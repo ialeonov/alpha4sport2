@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alpha4sport
+      POSTGRES_USER: alpha4sport
+      POSTGRES_PASSWORD: alpha4sport
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../backend/.env
+    depends_on:
+      - db
+    volumes:
+      - /var/www/uploads:/app/uploads
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: >
+      sh -c "PYTHONPATH=/app alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  pg_data:
