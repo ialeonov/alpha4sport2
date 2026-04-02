@@ -134,14 +134,8 @@ class WorkoutShareCard extends StatelessWidget {
 
                   const SizedBox(height: 14),
 
-                  // ── User row ───────────────────────────────────────
-                  if (info != null) ...[
-                    _buildUserRow(info),
-                    const SizedBox(height: 14),
-                  ],
-
-                  // ── Workout title + date/duration ──────────────────
-                  _buildHero(name, startedAt, durationMin),
+                  // ── User row (with workout info on right) ──────────
+                  _buildUserRow(info, name, startedAt, durationMin),
 
                   const SizedBox(height: 16),
 
@@ -177,76 +171,152 @@ class WorkoutShareCard extends StatelessWidget {
     );
   }
 
-  // ── User row ──────────────────────────────────────────────────────────
+  // ── User row (left: avatar+name+level; right: workout name+date+count) ──
 
-  Widget _buildUserRow(ShareUserInfo info) {
-    return Row(
-      children: [
-        // Avatar
-        _buildAvatar(info),
-        const SizedBox(width: 12),
-        // Name + level
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (info.displayName != null && info.displayName!.isNotEmpty)
+  Widget _buildUserRow(
+    ShareUserInfo? info,
+    String workoutName,
+    DateTime? startedAt,
+    int? durationMin,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _divider, width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Avatar
+          if (info != null) _buildAvatar(info),
+          const SizedBox(width: 12),
+          // Left: user identity
+          Expanded(
+            flex: 1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (info != null &&
+                    info.displayName != null &&
+                    info.displayName!.isNotEmpty)
+                  Text(
+                    info.displayName!,
+                    style: const TextStyle(
+                      color: _textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _accent.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: _accent.withValues(alpha: 0.28), width: 1),
+                  ),
+                  child: Text(
+                    info?.levelLabel ?? 'Атлет',
+                    style: const TextStyle(
+                      color: _accent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Vertical divider
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            width: 1,
+            height: 40,
+            color: _divider,
+          ),
+          // Right: workout identity
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
-                  info.displayName!,
+                  workoutName,
                   style: const TextStyle(
                     color: _textPrimary,
                     fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     height: 1.2,
+                    letterSpacing: -0.2,
                   ),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
                 ),
-              if (info.totalWorkouts != null) ...[
-                const SizedBox(height: 2),
+                const SizedBox(height: 5),
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _accent.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                            color: _accent.withValues(alpha: 0.25), width: 1),
-                      ),
-                      child: Text(
-                        info.levelLabel,
+                    if (startedAt != null) ...[
+                      const Icon(Icons.calendar_today_rounded,
+                          size: 10, color: _textSecondary),
+                      const SizedBox(width: 3),
+                      Text(
+                        _formatDate(startedAt),
                         style: const TextStyle(
-                          color: _accent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
+                          color: _textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${info.totalWorkouts} тренировок',
-                      style: const TextStyle(
-                        color: _textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
+                    ],
+                    if (durationMin != null && durationMin > 0) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.timer_rounded,
+                          size: 10, color: _textSecondary),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$durationMin мин',
+                        style: const TextStyle(
+                          color: _textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
+                if (info?.totalWorkouts != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    '${info!.totalWorkouts} тренировок',
+                    style: const TextStyle(
+                      color: _textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildAvatar(ShareUserInfo info) {
-    const size = 38.0;
+    const size = 54.0;
     final url = info.resolvedAvatarUrl;
     if (url != null && url.isNotEmpty) {
       return ClipOval(
@@ -269,81 +339,18 @@ class WorkoutShareCard extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: _accent.withValues(alpha: 0.18),
-        border: Border.all(color: _accent.withValues(alpha: 0.3), width: 1.5),
+        border: Border.all(color: _accent.withValues(alpha: 0.35), width: 2),
       ),
       child: Center(
         child: Text(
           initials,
-          style: const TextStyle(
+          style: TextStyle(
             color: _accent,
-            fontSize: 13,
+            fontSize: size * 0.36,
             fontWeight: FontWeight.w900,
           ),
         ),
       ),
-    );
-  }
-
-  // ── Hero ──────────────────────────────────────────────────────────────
-
-  Widget _buildHero(String name, DateTime? startedAt, int? durationMin) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          name.toUpperCase(),
-          style: const TextStyle(
-            color: _textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.3,
-            height: 1.15,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 7),
-        Row(
-          children: [
-            if (startedAt != null) ...[
-              const Icon(Icons.calendar_today_rounded,
-                  size: 11, color: _textSecondary),
-              const SizedBox(width: 4),
-              Text(
-                _formatDate(startedAt),
-                style: const TextStyle(
-                  color: _textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-            if (durationMin != null && durationMin > 0) ...[
-              const SizedBox(width: 12),
-              Container(
-                width: 2,
-                height: 2,
-                decoration: const BoxDecoration(
-                  color: _textSecondary,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Icon(Icons.timer_rounded,
-                  size: 11, color: _textSecondary),
-              const SizedBox(width: 4),
-              Text(
-                '$durationMin мин',
-                style: const TextStyle(
-                  color: _textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ],
     );
   }
 
@@ -370,7 +377,7 @@ class WorkoutShareCard extends StatelessWidget {
 
   Widget _buildStatCell(_StatItem item) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(12),
@@ -383,19 +390,19 @@ class WorkoutShareCard extends StatelessWidget {
             item.value,
             style: const TextStyle(
               color: _textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             item.label,
             style: const TextStyle(
               color: _textSecondary,
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -428,95 +435,125 @@ class WorkoutShareCard extends StatelessWidget {
     );
   }
 
-  // ── Exercise list (up to 10, ultra-compact) ───────────────────────────
+  // ── Exercise list (adaptive sizing, no cap) ───────────────────────────
+
+  static _ExerciseListStyle _exerciseStyle(int count) {
+    if (count <= 8)  return const _ExerciseListStyle(nameFontSize: 14, valFontSize: 14, dividerHeight: 8);
+    if (count <= 12) return const _ExerciseListStyle(nameFontSize: 13, valFontSize: 13, dividerHeight: 6);
+    if (count <= 16) return const _ExerciseListStyle(nameFontSize: 12, valFontSize: 12, dividerHeight: 5);
+    if (count <= 22) return const _ExerciseListStyle(nameFontSize: 11, valFontSize: 11, dividerHeight: 4);
+    return               const _ExerciseListStyle(nameFontSize: 10, valFontSize: 10, dividerHeight: 3);
+  }
 
   Widget _buildExerciseList(List<dynamic> exercises) {
-    final shown = exercises.take(10).toList();
-    final remaining = exercises.length - shown.length;
+    final style = _exerciseStyle(exercises.length);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < shown.length; i++) ...[
-          if (i > 0) const Divider(color: _divider, thickness: 1, height: 8),
-          _buildExerciseRow(shown[i] as Map),
-        ],
-        if (remaining > 0) ...[
-          const Divider(color: _divider, thickness: 1, height: 8),
-          Text(
-            '+ ещё $remaining',
-            style: const TextStyle(
-              color: _textSecondary,
-              fontSize: 10,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
+        for (var i = 0; i < exercises.length; i++) ...[
+          if (i > 0)
+            Divider(color: _divider, thickness: 1, height: style.dividerHeight),
+          _buildExerciseRow(exercises[i] as Map, style),
         ],
       ],
     );
   }
 
-  Widget _buildExerciseRow(Map exercise) {
+  Widget _buildExerciseRow(Map exercise, _ExerciseListStyle style) {
     final name = (exercise['exercise_name'] ?? '').toString();
     final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
-    final setCount = sets.where((s) {
-      final reps = (s as Map?)?['reps'];
-      return reps is num && reps > 0;
-    }).length;
-    final maxWeight = sets.fold<double>(0, (max, s) {
-      final w = (s as Map?)?['weight'];
-      if (w is num && w.toDouble() > max) return w.toDouble();
-      return max;
-    });
-
-    final weightLabel = maxWeight > 0 ? '${formatWeight(maxWeight)} кг' : 'б/в';
-    final setsLabel = setCount > 0 ? '$setCount×$weightLabel' : weightLabel;
     final isRecord = records.contains(name);
+
+    // Best working set: max weight first, then max reps at that weight
+    double bestWeight = 0;
+    int bestReps = 0;
+    for (final s in sets) {
+      final w = (s as Map?)?['weight'];
+      final r = s?['reps'];
+      if (w is! num || r is! num || r <= 0) continue;
+      final wd = w.toDouble();
+      final ri = r.toInt();
+      if (wd > bestWeight || (wd == bestWeight && ri > bestReps)) {
+        bestWeight = wd;
+        bestReps = ri;
+      }
+    }
 
     return Row(
       children: [
         Expanded(
           child: Text(
             name,
-            style: const TextStyle(
+            style: TextStyle(
               color: _textPrimary,
-              fontSize: 12,
+              fontSize: style.nameFontSize,
               fontWeight: FontWeight.w500,
-              height: 1.25,
+              height: 1.3,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         if (isRecord)
           Container(
-            margin: const EdgeInsets.only(right: 5),
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            margin: const EdgeInsets.only(right: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
             decoration: BoxDecoration(
               color: _recordGold.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(4),
-              border:
-                  Border.all(color: _recordGold.withValues(alpha: 0.35)),
+              border: Border.all(color: _recordGold.withValues(alpha: 0.35)),
             ),
             child: const Text(
               'РЕК',
               style: TextStyle(
                 color: _recordGold,
-                fontSize: 8,
+                fontSize: 9,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.2,
               ),
             ),
           ),
-        Text(
-          setsLabel,
-          style: const TextStyle(
-            color: _accent,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
+        // Weight (teal) + reps (gray)
+        if (bestWeight > 0) ...[
+          Text(
+            '${formatWeight(bestWeight)} кг',
+            style: TextStyle(
+              color: _accent,
+              fontSize: style.valFontSize,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
+          if (bestReps > 0) ...[
+            const SizedBox(width: 5),
+            Text(
+              '× $bestReps',
+              style: TextStyle(
+                color: _textSecondary,
+                fontSize: style.valFontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ] else if (bestReps > 0)
+          Text(
+            '× $bestReps',
+            style: TextStyle(
+              color: _textSecondary,
+              fontSize: style.valFontSize,
+              fontWeight: FontWeight.w600,
+            ),
+          )
+        else
+          Text(
+            'б/в',
+            style: TextStyle(
+              color: _textSecondary,
+              fontSize: style.valFontSize,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
       ],
     );
   }
@@ -538,30 +575,44 @@ class WorkoutShareCard extends StatelessWidget {
   // ── Footer ────────────────────────────────────────────────────────────
 
   Widget _buildFooter() {
-    return Column(
-      children: [
-        Text(
-          'Фитнес трекер · Подсказки по тренировкам',
-          style: TextStyle(
-            color: _textSecondary.withValues(alpha: 0.45),
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.2,
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'Фитнес трекер · Подсказки по тренировкам',
+            style: TextStyle(
+              color: _textSecondary.withValues(alpha: 0.5),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.1,
+            ),
+            textAlign: TextAlign.center,
           ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 3),
-        Text(
-          'fit.ileonov.ru',
-          style: TextStyle(
-            color: _textSecondary.withValues(alpha: 0.7),
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
+          const SizedBox(height: 5),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+            decoration: BoxDecoration(
+              color: _accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border:
+                  Border.all(color: _accent.withValues(alpha: 0.3), width: 1),
+            ),
+            child: const Text(
+              'fit.ileonov.ru',
+              style: TextStyle(
+                color: _accent,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
           ),
-          textAlign: TextAlign.center,
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -608,4 +659,15 @@ class _StatItem {
   const _StatItem(this.value, this.label);
   final String value;
   final String label;
+}
+
+class _ExerciseListStyle {
+  const _ExerciseListStyle({
+    required this.nameFontSize,
+    required this.valFontSize,
+    required this.dividerHeight,
+  });
+  final double nameFontSize;
+  final double valFontSize;
+  final double dividerHeight;
 }
