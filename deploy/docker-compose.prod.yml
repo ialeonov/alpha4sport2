@@ -20,6 +20,7 @@ services:
       - db
     volumes:
       - /var/www/uploads:/app/uploads
+      - ../docs:/app/docs:ro
     ports:
       - "127.0.0.1:8000:8000"
     command: >
