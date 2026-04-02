@@ -6,6 +6,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../../core/network/backend_api.dart';
+import '../../../core/storage/local_cache.dart';
 import '../../heatmap/data/muscle_heatmap_asset_loader.dart';
 import '../../heatmap/domain/muscle_heatmap_color_resolver.dart';
 import '../../heatmap/domain/muscle_heatmap_models.dart';
@@ -13,17 +15,6 @@ import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/body_svg_colorizer.dart';
 import '../presentation/workout_share_card.dart';
 
-/// Builds the heatmap SVG + top muscle labels for a given workout,
-/// then shows a preview dialog and lets the user download a 1080×1920 PNG.
-///
-/// Usage:
-/// ```dart
-/// await WorkoutShareService.share(
-///   context: context,
-///   workout: workout,
-///   exerciseCatalog: catalog,
-/// );
-/// ```
 class WorkoutShareService {
   const WorkoutShareService._();
 
@@ -35,49 +26,24 @@ class WorkoutShareService {
     required List<Map<String, dynamic>> exerciseCatalog,
     List<String> records = const [],
   }) async {
-    // 1. Load heatmap assets (cached after first call)
-    final assetData = await const MuscleHeatmapAssetLoader().load();
+    // Load everything in parallel
+    final results = await Future.wait([
+      const MuscleHeatmapAssetLoader().load(),
+      _loadUserInfo(),
+    ]);
 
-    // 2. Compute muscle loads
+    final assetData = results[0] as MuscleHeatmapAssetData;
+    final userInfo = results[1] as ShareUserInfo?;
+
     final calc = const MuscleLoadCalculator();
     final rawLoads = calc.calculateForWorkout(
       workout: workout,
       exerciseCatalog: exerciseCatalog,
     );
     final normalizedLoads = calc.normalizer.normalize(rawLoads);
-
-    // 3. Build colored SVG string synchronously
     final coloredSvg = _buildColoredSvg(assetData, normalizedLoads);
 
-    // 4. Get top muscle labels
-    final topMuscles = calc.buildTopMuscles(
-      rawLoads: rawLoads,
-      normalizedLoads: normalizedLoads,
-      labels: assetData.zoneLabels,
-      limit: 3,
-    );
-    final topLabels = topMuscles.map((m) => m.label).toList();
-
-    // 5. Show the share dialog
     if (!context.mounted) return;
-    await _showShareDialog(
-      context: context,
-      workout: workout,
-      coloredSvg: coloredSvg,
-      topMuscleLabels: topLabels,
-      records: records,
-    );
-  }
-
-  // ── Share dialog ─────────────────────────────────────────────────────
-
-  static Future<void> _showShareDialog({
-    required BuildContext context,
-    required Map<String, dynamic> workout,
-    required String coloredSvg,
-    required List<String> topMuscleLabels,
-    required List<String> records,
-  }) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -85,10 +51,55 @@ class WorkoutShareService {
       builder: (_) => _ShareSheet(
         workout: workout,
         coloredSvg: coloredSvg,
-        topMuscleLabels: topMuscleLabels,
+        userInfo: userInfo,
         records: records,
       ),
     );
+  }
+
+  // ── User info loader ─────────────────────────────────────────────────
+
+  static Future<ShareUserInfo?> _loadUserInfo() async {
+    try {
+      final futures = await Future.wait([
+        BackendApi.getCurrentUser(),
+        _loadTotalWorkoutCount(),
+      ]);
+      final user = futures[0] as Map<String, dynamic>;
+      final count = futures[1] as int?;
+
+      final rawAvatarUrl =
+          (user['avatar_url'] ?? '').toString().trim();
+      final resolvedUrl = rawAvatarUrl.isEmpty
+          ? null
+          : rawAvatarUrl.startsWith('http')
+              ? rawAvatarUrl
+              : rawAvatarUrl.startsWith('/')
+                  ? '${BackendApi.configuredAssetBaseUrl}$rawAvatarUrl'
+                  : '${BackendApi.configuredAssetBaseUrl}/uploads/$rawAvatarUrl';
+
+      return ShareUserInfo(
+        displayName:
+            (user['display_name'] ?? '').toString().trim().isEmpty
+                ? null
+                : (user['display_name'] as String).trim(),
+        resolvedAvatarUrl: resolvedUrl,
+        totalWorkouts: count,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<int?> _loadTotalWorkoutCount() async {
+    try {
+      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
+      if (cached != null) return cached.length;
+      final workouts = await BackendApi.getWorkouts();
+      return workouts.length;
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── SVG helpers ──────────────────────────────────────────────────────
@@ -117,14 +128,13 @@ class WorkoutShareService {
 
   // ── PNG capture ──────────────────────────────────────────────────────
 
-  /// Captures the widget identified by [key] as a 1080×1920 PNG.
   static Future<Uint8List?> captureCard(GlobalKey key) async {
     final boundary =
         key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
     if (boundary == null) return null;
 
-    // Wait two frames so flutter_svg has finished painting.
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Allow SVG + network avatar to finish painting
+    await Future.delayed(const Duration(milliseconds: 500));
 
     final image = await boundary.toImage(pixelRatio: 2.0);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -143,19 +153,19 @@ class WorkoutShareService {
   }
 }
 
-// ── Bottom sheet widget ──────────────────────────────────────────────────────
+// ── Bottom sheet ─────────────────────────────────────────────────────────────
 
 class _ShareSheet extends StatefulWidget {
   const _ShareSheet({
     required this.workout,
     required this.coloredSvg,
-    required this.topMuscleLabels,
+    required this.userInfo,
     required this.records,
   });
 
   final Map<String, dynamic> workout;
   final String coloredSvg;
-  final List<String> topMuscleLabels;
+  final ShareUserInfo? userInfo;
   final List<String> records;
 
   @override
@@ -166,17 +176,17 @@ class _ShareSheetState extends State<_ShareSheet> {
   final _repaintKey = GlobalKey();
   bool _capturing = false;
 
-  // ── Download ─────────────────────────────────────────────────────────
-
   Future<void> _download() async {
     if (_capturing) return;
     setState(() => _capturing = true);
-
     try {
       final bytes = await WorkoutShareService.captureCard(_repaintKey);
       if (bytes == null) {
         if (!mounted) return;
-        _showError('Не удалось создать изображение. Попробуйте ещё раз.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Не удалось создать изображение. Попробуйте ещё раз.')),
+        );
         return;
       }
       final name = (widget.workout['name'] ?? 'workout').toString();
@@ -186,41 +196,35 @@ class _ShareSheetState extends State<_ShareSheet> {
           .replaceAll(RegExp(r'_+'), '_')
           .replaceAll(RegExp(r'^_|_$'), '');
       WorkoutShareService.downloadPng(bytes, 'workout_$slug.png');
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      _showError('Ошибка при создании изображения.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ошибка при создании изображения.')),
+      );
     } finally {
       if (mounted) setState(() => _capturing = false);
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final screenHeight = MediaQuery.sizeOf(context).height;
-    // Reserve space for buttons + safe area; the card preview fills the rest.
-    final previewAreaHeight = screenHeight * 0.72;
-    // Scale factor to fit 540×960 card into the preview area
-    final scale = (previewAreaHeight / WorkoutShareCard.cardHeight)
-        .clamp(0.3, 1.0);
-    final previewWidth = WorkoutShareCard.cardWidth * scale;
-    final previewHeight = WorkoutShareCard.cardHeight * scale;
+    final bottomPad = MediaQuery.paddingOf(context).bottom;
+
+    final maxPreviewH = screenHeight * 0.70;
+    final scale =
+        (maxPreviewH / WorkoutShareCard.cardHeight).clamp(0.25, 1.0);
+    final previewW = WorkoutShareCard.cardWidth * scale;
+    final previewH = WorkoutShareCard.cardHeight * scale;
 
     return Container(
+      height: screenHeight * 0.92,
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
           // Drag handle
           Container(
@@ -232,16 +236,17 @@ class _ShareSheetState extends State<_ShareSheet> {
               borderRadius: BorderRadius.circular(99),
             ),
           ),
-          // Title
+          // Title row
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            padding: const EdgeInsets.fromLTRB(24, 14, 8, 0),
             child: Row(
               children: [
                 Text(
                   'Карточка тренировки',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const Spacer(),
                 IconButton(
@@ -251,47 +256,33 @@ class _ShareSheetState extends State<_ShareSheet> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          // Card preview (off-screen render inside RepaintBoundary, visible via scale)
-          Center(
-            child: SizedBox(
-              width: previewWidth,
-              height: previewHeight,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: RepaintBoundary(
-                  key: _repaintKey,
-                  child: WorkoutShareCard(
-                    workout: widget.workout,
-                    coloredSvgSource: widget.coloredSvg,
-                    topMuscleLabels: widget.topMuscleLabels,
-                    records: widget.records,
+          // Scrollable card preview
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: SizedBox(
+                  width: previewW,
+                  height: previewH,
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: RepaintBoundary(
+                      key: _repaintKey,
+                      child: WorkoutShareCard(
+                        workout: widget.workout,
+                        coloredSvgSource: widget.coloredSvg,
+                        userInfo: widget.userInfo,
+                        records: widget.records,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 20),
-          // Hint text
+          // Download button — always visible
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(
-              'Сохраните как PNG и поделитесь в Instagram Stories или Telegram',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Download button
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              24,
-              0,
-              24,
-              MediaQuery.paddingOf(context).bottom + 20,
-            ),
+            padding: EdgeInsets.fromLTRB(24, 0, 24, bottomPad + 20),
             child: FilledButton.icon(
               onPressed: _capturing ? null : _download,
               icon: _capturing
@@ -301,9 +292,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.download_rounded),
-              label: Text(
-                _capturing ? 'Создаём PNG...' : 'Скачать PNG · 1080×1920',
-              ),
+              label: Text(_capturing ? 'Создаём...' : 'Скачать PNG'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size(double.infinity, 56),
               ),
