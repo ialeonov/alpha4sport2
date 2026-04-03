@@ -140,7 +140,6 @@ def ensure_seed_catalog(db: Session, user_id: int) -> int:
     seed_catalog = load_seed_catalog()
     existing_exercises = list(db.scalars(list_catalog_exercises_stmt(user_id)))
     by_slug = {exercise.slug: exercise for exercise in existing_exercises}
-    by_name = {exercise.name: exercise for exercise in existing_exercises}
     created = 0
     changed = False
 
@@ -151,8 +150,6 @@ def ensure_seed_catalog(db: Session, user_id: int) -> int:
         secondary_muscles = list(item['secondary_muscles'])
 
         exercise = by_slug.get(slug)
-        if exercise is None:
-            exercise = by_name.get(name)
 
         if exercise is None:
             exercise = ExerciseCatalog(
@@ -163,7 +160,6 @@ def ensure_seed_catalog(db: Session, user_id: int) -> int:
             )
             db.add(exercise)
             existing_exercises.append(exercise)
-            by_name[name] = exercise
             created += 1
             changed = True
         else:

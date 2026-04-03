@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
@@ -14,6 +14,14 @@ from app.services.account_event_service import AccountEventService
 from app.services.progression_service import ProgressionService
 
 router = APIRouter()
+
+
+def _normalize_exercise_name(value: str) -> str:
+    return value.strip().lower().replace('ё', 'е')
+
+
+def _normalized_exercise_name_expr():
+    return func.replace(func.lower(WorkoutExercise.exercise_name), 'ё', 'е')
 
 
 def _hydrate_exercises(workout: Workout, payload_exercises: list, db: Session, user_id: int) -> None:
@@ -152,11 +160,15 @@ def previous_exercise_values(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    normalized_name = _normalize_exercise_name(exercise_name)
     stmt = (
         select(Workout.started_at, ExerciseSet.weight, ExerciseSet.reps)
         .join(WorkoutExercise, WorkoutExercise.workout_id == Workout.id)
         .join(ExerciseSet, ExerciseSet.workout_exercise_id == WorkoutExercise.id)
-        .where(Workout.user_id == current_user.id, WorkoutExercise.exercise_name == exercise_name)
+        .where(
+            Workout.user_id == current_user.id,
+            _normalized_exercise_name_expr() == normalized_name,
+        )
         .order_by(Workout.started_at.desc(), ExerciseSet.position.desc())
         .limit(limit)
     )

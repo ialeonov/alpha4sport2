@@ -73,8 +73,9 @@ class ProgressAnalysisService {
         }
 
         final catalogId = exercise['catalog_exercise_id'];
-        final canonicalKey =
-            catalogId != null ? 'c:$catalogId' : 'n:$exerciseName';
+        final canonicalKey = catalogId != null
+            ? 'c:$catalogId'
+            : 'n:${_normalizeExerciseLookupName(exerciseName)}';
 
         // Keep the name from the most recent workout for this group.
         final prevDate = latestDateByKey[canonicalKey];
@@ -83,9 +84,12 @@ class ProgressAnalysisService {
           latestNameByKey[canonicalKey] = exerciseName;
         }
 
-        final repRange = repRanges[exerciseName] ??
-            repRanges[latestNameByKey[canonicalKey] ?? exerciseName] ??
-            defaultRepRange;
+        final repRange =
+            repRanges[_normalizeExerciseLookupName(exerciseName)] ??
+                repRanges[_normalizeExerciseLookupName(
+                  latestNameByKey[canonicalKey] ?? exerciseName,
+                )] ??
+                defaultRepRange;
         final session = _buildSessionPerformance(
           exerciseName: exerciseName,
           performedAt: performedAt,
@@ -295,12 +299,13 @@ class ProgressAnalysisService {
       for (final rawExercise in exercises) {
         final exercise = (rawExercise as Map).cast<String, dynamic>();
         final name = (exercise['exercise_name'] ?? '').toString().trim();
-        if (name.isEmpty || result.containsKey(name)) {
+        final normalizedName = _normalizeExerciseLookupName(name);
+        if (normalizedName.isEmpty || result.containsKey(normalizedName)) {
           continue;
         }
 
         final targetReps = (exercise['target_reps'] ?? '').toString().trim();
-        result[name] = _parseRepRange(targetReps) ?? defaultRepRange;
+        result[normalizedName] = _parseRepRange(targetReps) ?? defaultRepRange;
       }
     }
 
@@ -384,4 +389,8 @@ class ProgressAnalysisService {
   double _roundScore(double value) {
     return double.parse(value.clamp(0, 0.99).toStringAsFixed(2));
   }
+}
+
+String _normalizeExerciseLookupName(String value) {
+  return value.trim().toLowerCase().replaceAll('ё', 'е');
 }

@@ -14,10 +14,12 @@ class MuscleLoadCalculator {
   final double baseSetScore;
   final double primaryMuscleFactor;
   final double secondaryMuscleFactor;
+
   /// Factor applied to stabilizer muscles (e.g. core) that are listed as
   /// secondary in nearly every exercise. Much lower than [secondaryMuscleFactor]
   /// so that stabilizers don't dominate the heatmap.
   final double stabilizerFactor;
+
   /// Set of muscle keys treated as stabilizers. Defaults to {'кор'}.
   final Set<String> stabilizerMuscles;
   final MuscleLoadNormalizer normalizer;
@@ -46,7 +48,7 @@ class MuscleLoadCalculator {
       }
       final name = (exercise['name'] ?? '').toString().trim();
       if (name.isNotEmpty) {
-        catalogByName[name] = exercise;
+        catalogByName[_normalizeExerciseLookupName(name)] = exercise;
       }
     }
 
@@ -280,7 +282,7 @@ class MuscleLoadCalculator {
     if (name.isEmpty) {
       return null;
     }
-    return catalogByName[name];
+    return catalogByName[_normalizeExerciseLookupName(name)];
   }
 
   double _toDouble(dynamic value) {
@@ -292,6 +294,10 @@ class MuscleLoadCalculator {
     }
     return double.tryParse(value.toString().replaceAll(',', '.')) ?? 0;
   }
+}
+
+String _normalizeExerciseLookupName(String value) {
+  return value.trim().toLowerCase().replaceAll('ё', 'е');
 }
 
 String formatMuscleLabel(String value) => _formatMuscleLabel(value);

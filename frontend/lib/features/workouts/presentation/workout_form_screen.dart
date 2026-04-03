@@ -293,7 +293,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   }
 
   Future<void> _fetchExerciseLastSet(String exerciseName) async {
-    final normalizedName = exerciseName.trim();
+    final normalizedName = _normalizeExerciseLookupName(exerciseName);
     if (normalizedName.isEmpty) {
       return;
     }
@@ -319,12 +319,16 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     List<Map<String, dynamic>> history,
     String exerciseName,
   ) {
+    final normalizedTargetName = _normalizeExerciseLookupName(exerciseName);
     for (final workout in history) {
       final exercises =
           (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
       for (final rawExercise in exercises) {
         final exercise = (rawExercise as Map).cast<String, dynamic>();
-        if ((exercise['exercise_name'] ?? '').toString() != exerciseName) {
+        if (_normalizeExerciseLookupName(
+              (exercise['exercise_name'] ?? '').toString(),
+            ) !=
+            normalizedTargetName) {
           continue;
         }
         final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
@@ -567,94 +571,95 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: scheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(999),
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: scheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Точный вес',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Введите нужный вес сразу, например 31.5 кг.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                  const SizedBox(height: 16),
+                  Text(
+                    'Точный вес',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Вес, кг',
-                    hintText: 'Например, 31.5',
+                  const SizedBox(height: 8),
+                  Text(
+                    'Введите нужный вес сразу, например 31.5 кг.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _MiniActionChip(
-                      label: 'Очистить',
-                      onTap: () {
-                        controller.clear();
-                        Navigator.of(context).pop(0);
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Вес, кг',
+                      hintText: 'Например, 31.5',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _MiniActionChip(
+                        label: 'Очистить',
+                        onTap: () {
+                          controller.clear();
+                          Navigator.of(context).pop(0);
+                        },
+                      ),
+                      _MiniActionChip(
+                        label: '20 кг',
+                        onTap: () => Navigator.of(context).pop(20),
+                      ),
+                      _MiniActionChip(
+                        label: '25 кг',
+                        onTap: () => Navigator.of(context).pop(25),
+                      ),
+                      _MiniActionChip(
+                        label: '30 кг',
+                        onTap: () => Navigator.of(context).pop(30),
+                      ),
+                      _MiniActionChip(
+                        label: '40 кг',
+                        onTap: () => Navigator.of(context).pop(40),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () {
+                        final parsed = _parseWeight(controller.text);
+                        if (parsed == null &&
+                            controller.text.trim().isNotEmpty) {
+                          Navigator.of(context).pop(double.nan);
+                          return;
+                        }
+                        Navigator.of(context).pop(parsed ?? 0);
                       },
+                      child: const Text('Применить'),
                     ),
-                    _MiniActionChip(
-                      label: '20 кг',
-                      onTap: () => Navigator.of(context).pop(20),
-                    ),
-                    _MiniActionChip(
-                      label: '25 кг',
-                      onTap: () => Navigator.of(context).pop(25),
-                    ),
-                    _MiniActionChip(
-                      label: '30 кг',
-                      onTap: () => Navigator.of(context).pop(30),
-                    ),
-                    _MiniActionChip(
-                      label: '40 кг',
-                      onTap: () => Navigator.of(context).pop(40),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () {
-                      final parsed = _parseWeight(controller.text);
-                      if (parsed == null && controller.text.trim().isNotEmpty) {
-                        Navigator.of(context).pop(double.nan);
-                        return;
-                      }
-                      Navigator.of(context).pop(parsed ?? 0);
-                    },
-                    child: const Text('Применить'),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
         );
       },
     );
@@ -1257,10 +1262,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                 final exercise = _exercises[exerciseIndex];
                 final accent = _exerciseAccentColor(scheme, exerciseIndex);
                 final lastSetState =
-                    _lastSetByExerciseName[exercise.nameController.text.trim()];
+                    _lastSetByExerciseName[_normalizeExerciseLookupName(
+                  exercise.nameController.text,
+                )];
                 final canDelete = _exercises.length > 1;
-                final isEmpty =
-                    exercise.nameController.text.trim().isEmpty;
+                final isEmpty = exercise.nameController.text.trim().isEmpty;
                 return Padding(
                   key: exercise.containerKey,
                   padding: const EdgeInsets.only(bottom: 12),
@@ -1283,8 +1289,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                           ),
                           FilledButton(
                             style: FilledButton.styleFrom(
-                              backgroundColor:
-                                  Theme.of(ctx).colorScheme.error,
+                              backgroundColor: Theme.of(ctx).colorScheme.error,
                             ),
                             onPressed: () => Navigator.of(ctx).pop(true),
                             child: const Text('Удалить'),
@@ -1318,346 +1323,353 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                     ),
                     child: DashboardCard(
                       leftAccentColor: accent,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: accent.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: accent.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '${exerciseIndex + 1}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(
+                                        color: accent,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                ),
                               ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                '${exerciseIndex + 1}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(
-                                      color: accent,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(14),
-                                onTap: () => _pickExercise(exerciseIndex),
-                                child: exercise.nameController.text
-                                        .trim()
-                                        .isEmpty
-                                    ? Container(
-                                        margin: const EdgeInsets.symmetric(
-                                            vertical: 2),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 10),
-                                        decoration: BoxDecoration(
-                                          color: accent.withValues(alpha: 0.08),
-                                          borderRadius:
-                                              BorderRadius.circular(14),
-                                          border: Border.all(
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(14),
+                                  onTap: () => _pickExercise(exerciseIndex),
+                                  child: exercise.nameController.text
+                                          .trim()
+                                          .isEmpty
+                                      ? Container(
+                                          margin: const EdgeInsets.symmetric(
+                                              vertical: 2),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 10),
+                                          decoration: BoxDecoration(
                                             color:
-                                                accent.withValues(alpha: 0.30),
-                                            style: BorderStyle.solid,
+                                                accent.withValues(alpha: 0.08),
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            border: Border.all(
+                                              color: accent.withValues(
+                                                  alpha: 0.30),
+                                              style: BorderStyle.solid,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.add_circle_outline,
+                                                  size: 16, color: accent),
+                                              const SizedBox(width: 8),
+                                              Flexible(
+                                                child: Text(
+                                                  'Выберите упражнение',
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleSmall
+                                                      ?.copyWith(
+                                                        color: accent,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        )
+                                      : Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 4),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      exercise
+                                                          .nameController.text
+                                                          .trim(),
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .titleMedium
+                                                          ?.copyWith(
+                                                            fontWeight:
+                                                                FontWeight.w800,
+                                                          ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    if (lastSetState?.loading ==
+                                                        true)
+                                                      Text(
+                                                        'Загружаем прошлый рабочий подход...',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: scheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                      )
+                                                    else if (lastSetState
+                                                            ?.lastSet !=
+                                                        null)
+                                                      Text(
+                                                        'Последний рабочий: ${formatWeight(lastSetState!.lastSet!.weight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: scheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                      )
+                                                    else
+                                                      Text(
+                                                        'Подходов: ${exercise.sets.length}',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: scheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                              Icon(
+                                                Icons.chevron_right_rounded,
+                                                size: 18,
+                                                color: scheme.onSurfaceVariant
+                                                    .withValues(alpha: 0.5),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.add_circle_outline,
-                                                size: 16, color: accent),
-                                            const SizedBox(width: 8),
-                                            Flexible(
-                                              child: Text(
-                                                'Выберите упражнение',
-                                                overflow: TextOverflow.ellipsis,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .titleSmall
-                                                    ?.copyWith(
-                                                      color: accent,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      )
-                                    : Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 4),
-                                        child: Row(
-                                          children: [
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    exercise.nameController.text
-                                                        .trim(),
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .titleMedium
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.w800,
-                                                        ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  if (lastSetState?.loading ==
-                                                      true)
-                                                    Text(
-                                                      'Загружаем прошлый рабочий подход...',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: scheme
-                                                                .onSurfaceVariant,
-                                                          ),
-                                                    )
-                                                  else if (lastSetState
-                                                          ?.lastSet !=
-                                                      null)
-                                                    Text(
-                                                      'Последний рабочий: ${formatWeight(lastSetState!.lastSet!.weight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: scheme
-                                                                .onSurfaceVariant,
-                                                          ),
-                                                    )
-                                                  else
-                                                    Text(
-                                                      'Подходов: ${exercise.sets.length}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: scheme
-                                                                .onSurfaceVariant,
-                                                          ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                            Icon(
-                                              Icons.chevron_right_rounded,
-                                              size: 18,
-                                              color: scheme.onSurfaceVariant
-                                                  .withValues(alpha: 0.5),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
+                                ),
                               ),
-                            ),
-                            IconButton(
-                              onPressed: () =>
-                                  _openExerciseNoteDialog(exerciseIndex),
-                              tooltip: 'Заметка к упражнению',
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                exercise.noteController.text.isNotEmpty
-                                    ? Icons.sticky_note_2
-                                    : Icons.sticky_note_2_outlined,
-                                size: 20,
-                                color: exercise.noteController.text.isNotEmpty
-                                    ? scheme.secondary
-                                    : scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.5),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => setState(
-                                () => exercise.isCollapsed =
-                                    !exercise.isCollapsed,
-                              ),
-                              tooltip: exercise.isCollapsed
-                                  ? 'Развернуть упражнение'
-                                  : 'Свернуть упражнение',
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                exercise.isCollapsed
-                                    ? Icons.expand_more_rounded
-                                    : Icons.expand_less_rounded,
-                              ),
-                            ),
-                            if (isEmpty && canDelete)
                               IconButton(
                                 onPressed: () =>
-                                    _removeExercise(exerciseIndex),
-                                tooltip: 'Удалить упражнение',
+                                    _openExerciseNoteDialog(exerciseIndex),
+                                tooltip: 'Заметка к упражнению',
                                 visualDensity: VisualDensity.compact,
-                                icon: const Icon(Icons.delete_outline),
-                              ),
-                          ],
-                        ),
-                        if (exercise.noteController.text.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          GestureDetector(
-                            onTap: () =>
-                                _openExerciseNoteDialog(exerciseIndex),
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 2, right: 2),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color:
-                                    scheme.secondary.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: scheme.secondary
-                                      .withValues(alpha: 0.25),
+                                icon: Icon(
+                                  exercise.noteController.text.isNotEmpty
+                                      ? Icons.sticky_note_2
+                                      : Icons.sticky_note_2_outlined,
+                                  size: 20,
+                                  color: exercise.noteController.text.isNotEmpty
+                                      ? scheme.secondary
+                                      : scheme.onSurfaceVariant
+                                          .withValues(alpha: 0.5),
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.sticky_note_2_outlined,
-                                    size: 13,
-                                    color: scheme.secondary,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      exercise.noteController.text,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: scheme.onSurfaceVariant,
-                                          ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
+                              IconButton(
+                                onPressed: () => setState(
+                                  () => exercise.isCollapsed =
+                                      !exercise.isCollapsed,
+                                ),
+                                tooltip: exercise.isCollapsed
+                                    ? 'Развернуть упражнение'
+                                    : 'Свернуть упражнение',
+                                visualDensity: VisualDensity.compact,
+                                icon: Icon(
+                                  exercise.isCollapsed
+                                      ? Icons.expand_more_rounded
+                                      : Icons.expand_less_rounded,
+                                ),
                               ),
-                            ),
+                              if (isEmpty && canDelete)
+                                IconButton(
+                                  onPressed: () =>
+                                      _removeExercise(exerciseIndex),
+                                  tooltip: 'Удалить упражнение',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                            ],
                           ),
-                        ],
-                        if (!exercise.isCollapsed) ...[
-                          const SizedBox(height: 10),
-                          Builder(builder: (context) {
-                            final isMobile =
-                                MediaQuery.sizeOf(context).width < 600;
-                            final labelStyle = Theme.of(context)
-                                .textTheme
-                                .labelSmall
-                                ?.copyWith(
-                                  color: scheme.onSurfaceVariant
-                                      .withValues(alpha: 0.6),
-                                );
-                            return Padding(
-                              padding:
-                                  const EdgeInsets.only(left: 38, bottom: 2),
-                              child: Row(
-                                children: [
-                                  if (isMobile) ...[
+                          if (exercise.noteController.text.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            GestureDetector(
+                              onTap: () =>
+                                  _openExerciseNoteDialog(exerciseIndex),
+                              child: Container(
+                                margin:
+                                    const EdgeInsets.only(left: 2, right: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color:
+                                      scheme.secondary.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: scheme.secondary
+                                        .withValues(alpha: 0.25),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.sticky_note_2_outlined,
+                                      size: 13,
+                                      color: scheme.secondary,
+                                    ),
+                                    const SizedBox(width: 6),
                                     Expanded(
-                                      child: Center(
-                                          child: Text('кг', style: labelStyle)),
-                                    ),
-                                    const SizedBox(width: 26),
-                                    Expanded(
-                                      child: Center(
-                                          child:
-                                              Text('раз', style: labelStyle)),
-                                    ),
-                                    const SizedBox(width: 72),
-                                  ] else ...[
-                                    SizedBox(
-                                      width: 110,
-                                      child: Center(
-                                          child: Text('кг', style: labelStyle)),
-                                    ),
-                                    const SizedBox(width: 26),
-                                    SizedBox(
-                                      width: 110,
-                                      child: Center(
-                                          child:
-                                              Text('раз', style: labelStyle)),
+                                      child: Text(
+                                        exercise.noteController.text,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: scheme.onSurfaceVariant,
+                                            ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   ],
-                                ],
-                              ),
-                            );
-                          }),
-                          ...List.generate(exercise.sets.length, (setIndex) {
-                            final set = exercise.sets[setIndex];
-                            return Padding(
-                              key: set.containerKey,
-                              padding: EdgeInsets.only(
-                                bottom: setIndex == exercise.sets.length - 1
-                                    ? 0
-                                    : 4,
-                              ),
-                              child: _WorkoutSetRow(
-                                index: setIndex,
-                                set: set,
-                                onChanged: _handleDraftChanged,
-                                onDelete: exercise.sets.length == 1
-                                    ? null
-                                    : () => _removeSet(exerciseIndex, setIndex),
-                              ),
-                            );
-                          }),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: () => _addSet(exerciseIndex),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .secondary
-                                    .withValues(alpha: 0.18),
-                                foregroundColor:
-                                    Theme.of(context).colorScheme.secondary,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  side: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .secondary
-                                        .withValues(alpha: 0.35),
-                                  ),
                                 ),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              icon: const Icon(Icons.add_circle_outline,
-                                  size: 20),
-                              label: const Text(
-                                'Добавить подход',
-                                style: TextStyle(fontWeight: FontWeight.w700),
                               ),
                             ),
-                          ),
-                        ] else ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            'Подходов: ${exercise.sets.length}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: scheme.onSurfaceVariant,
+                          ],
+                          if (!exercise.isCollapsed) ...[
+                            const SizedBox(height: 10),
+                            Builder(builder: (context) {
+                              final isMobile =
+                                  MediaQuery.sizeOf(context).width < 600;
+                              final labelStyle = Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.6),
+                                  );
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 38, bottom: 2),
+                                child: Row(
+                                  children: [
+                                    if (isMobile) ...[
+                                      Expanded(
+                                        child: Center(
+                                            child:
+                                                Text('кг', style: labelStyle)),
+                                      ),
+                                      const SizedBox(width: 26),
+                                      Expanded(
+                                        child: Center(
+                                            child:
+                                                Text('раз', style: labelStyle)),
+                                      ),
+                                      const SizedBox(width: 72),
+                                    ] else ...[
+                                      SizedBox(
+                                        width: 110,
+                                        child: Center(
+                                            child:
+                                                Text('кг', style: labelStyle)),
+                                      ),
+                                      const SizedBox(width: 26),
+                                      SizedBox(
+                                        width: 110,
+                                        child: Center(
+                                            child:
+                                                Text('раз', style: labelStyle)),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                          ),
+                              );
+                            }),
+                            ...List.generate(exercise.sets.length, (setIndex) {
+                              final set = exercise.sets[setIndex];
+                              return Padding(
+                                key: set.containerKey,
+                                padding: EdgeInsets.only(
+                                  bottom: setIndex == exercise.sets.length - 1
+                                      ? 0
+                                      : 4,
+                                ),
+                                child: _WorkoutSetRow(
+                                  index: setIndex,
+                                  set: set,
+                                  onChanged: _handleDraftChanged,
+                                  onDelete: exercise.sets.length == 1
+                                      ? null
+                                      : () =>
+                                          _removeSet(exerciseIndex, setIndex),
+                                ),
+                              );
+                            }),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: () => _addSet(exerciseIndex),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .secondary
+                                      .withValues(alpha: 0.18),
+                                  foregroundColor:
+                                      Theme.of(context).colorScheme.secondary,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    side: BorderSide(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .secondary
+                                          .withValues(alpha: 0.35),
+                                    ),
+                                  ),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                ),
+                                icon: const Icon(Icons.add_circle_outline,
+                                    size: 20),
+                                label: const Text(
+                                  'Добавить подход',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              'Подходов: ${exercise.sets.length}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
                   ),
                 );
               }),
@@ -1774,6 +1786,10 @@ class _ExerciseDraft {
       set.dispose();
     }
   }
+}
+
+String _normalizeExerciseLookupName(String value) {
+  return value.trim().toLowerCase().replaceAll('ё', 'е');
 }
 
 class _SetDraft {
@@ -2043,42 +2059,41 @@ class _CompactSetField extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return TextField(
-        controller: controller,
-        onChanged: onChanged,
-        onTap: () {
-          controller.selection = TextSelection(
-            baseOffset: 0,
-            extentOffset: controller.text.length,
-          );
-        },
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-        decoration: InputDecoration(
-          hintText: hint,
-          suffixText: suffix,
-          suffixStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          filled: true,
-          fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.4),
-            ),
+      controller: controller,
+      onChanged: onChanged,
+      onTap: () {
+        controller.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: controller.text.length,
+        );
+      },
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(
-              color: scheme.primary.withValues(alpha: 0.6),
+      decoration: InputDecoration(
+        hintText: hint,
+        suffixText: suffix,
+        suffixStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        filled: true,
+        fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.4),
           ),
         ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: scheme.primary.withValues(alpha: 0.6),
+          ),
+        ),
+      ),
     );
   }
 }

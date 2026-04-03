@@ -13,17 +13,25 @@ from app.models.workout import ExerciseSet, Workout, WorkoutExercise
 router = APIRouter()
 
 
+def _normalize_exercise_name(value: str) -> str:
+    return value.strip().lower().replace('ё', 'е')
+
+
 @router.get('/exercise/{exercise_name}')
 def exercise_progress(
     exercise_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    normalized_name = _normalize_exercise_name(exercise_name)
     stmt = (
         select(Workout.started_at, ExerciseSet.weight, ExerciseSet.reps)
         .join(WorkoutExercise, WorkoutExercise.workout_id == Workout.id)
         .join(ExerciseSet, ExerciseSet.workout_exercise_id == WorkoutExercise.id)
-        .where(Workout.user_id == current_user.id, WorkoutExercise.exercise_name == exercise_name)
+        .where(
+            Workout.user_id == current_user.id,
+            func.replace(func.lower(WorkoutExercise.exercise_name), 'ё', 'е') == normalized_name,
+        )
         .order_by(Workout.started_at.asc())
     )
     rows = db.execute(stmt).all()

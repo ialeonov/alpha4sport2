@@ -65,7 +65,7 @@ class WorkoutExportService {
 
       final name = (exercise['name'] ?? '').toString().trim();
       if (name.isNotEmpty) {
-        catalogByName[name] = exercise;
+        catalogByName[_normalizeExerciseLookupName(name)] = exercise;
       }
     }
 
@@ -173,7 +173,7 @@ class WorkoutExportService {
     for (final exercise in exerciseCatalog) {
       final name = (exercise['name'] ?? '').toString().trim().toLowerCase();
       if (name.isNotEmpty) {
-        catalogByName[name] = exercise;
+        catalogByName[_normalizeExerciseLookupName(name)] = exercise;
       }
     }
 
@@ -331,7 +331,7 @@ class WorkoutExportService {
       });
     }
 
-    final catalogEntry = catalogByName[name.toLowerCase()];
+    final catalogEntry = catalogByName[_normalizeExerciseLookupName(name)];
     final exerciseNote =
         (exercise['notes'] ?? exercise['note'] ?? '').toString().trim();
     return {
@@ -497,7 +497,7 @@ class WorkoutExportService {
     if (name.isEmpty) {
       return null;
     }
-    return catalogByName[name];
+    return catalogByName[_normalizeExerciseLookupName(name)];
   }
 
   DateTime? _parseDateTime(dynamic value) {
@@ -602,6 +602,10 @@ class WorkoutExportService {
     }
     return 0;
   }
+}
+
+String _normalizeExerciseLookupName(String value) {
+  return value.trim().toLowerCase().replaceAll('ё', 'е');
 }
 
 String formatExportDate(DateTime value) {
