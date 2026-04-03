@@ -473,13 +473,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     try {
       final exerciseCatalog = await _workoutExportService.loadExerciseCatalog();
-      final templates = await _workoutExportService.loadTemplates();
       final exportData = _workoutExportService.buildExport(
         workouts: workouts,
         rangeFrom: _selectedDay,
         rangeTo: _selectedDay,
         exerciseCatalog: exerciseCatalog,
-        templates: templates,
       );
       final saved = await _workoutExportService.saveExportJson(
         exportData: exportData,
@@ -646,13 +644,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
     try {
       final exerciseCatalog =
           await _workoutExportService.loadExerciseCatalog();
-      final templates = await _workoutExportService.loadTemplates();
       final exportData = _workoutExportService.buildExport(
         workouts: selectedWorkouts,
         rangeFrom: pickedRange.start,
         rangeTo: pickedRange.end,
         exerciseCatalog: exerciseCatalog,
-        templates: templates,
       );
       final saved = await _workoutExportService.saveExportJson(
         exportData: exportData,
@@ -1453,34 +1449,39 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         },
                       ),
                       const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            FilledButton.icon(
-                              onPressed: _openAddWorkoutOptions,
-                              icon: const Icon(Icons.add),
-                              label: const Text('Добавить тренировку'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: selectedDayWorkouts.isEmpty
-                                  ? null
-                                  : () => _exportSelectedDayWorkouts(
-                                        selectedDayWorkouts,
-                                      ),
-                              icon: const Icon(Icons.file_download_outlined),
-                              label: const Text('Экспорт тренировки'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  _exportWorkoutRange(workouts),
-                              icon: const Icon(Icons.download_for_offline_outlined),
-                              label: const Text('Экспорт диапазона'),
-                            ),
-                          ],
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: _openAddWorkoutOptions,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Добавить тренировку'),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: selectedDayWorkouts.isEmpty
+                                      ? null
+                                      : () => _exportSelectedDayWorkouts(
+                                            selectedDayWorkouts,
+                                          ),
+                                  icon: const Icon(Icons.file_download_outlined, size: 18),
+                                  label: const Text('Тренировку'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _exportWorkoutRange(workouts),
+                                  icon: const Icon(Icons.download_for_offline_outlined, size: 18),
+                                  label: const Text('Диапазон'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ],
                   ),

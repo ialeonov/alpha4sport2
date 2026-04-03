@@ -4,8 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const service = WorkoutExportService();
 
-  test(
-      'buildExport creates structured workout export with muscles and duration',
+  test('buildExport creates factual workout export with muscles and duration',
       () {
     final export = service.buildExport(
       workouts: [
@@ -19,8 +18,8 @@ void main() {
               'catalog_exercise_id': 1,
               'exercise_name': 'Bench Press',
               'sets': [
-                {'position': 1, 'reps': 8, 'weight': 80},
-                {'position': 2, 'reps': 8, 'weight': 85},
+                {'position': 1, 'reps': 8, 'weight': 80, 'rpe': 8.5},
+                {'position': 2, 'reps': 8, 'weight': 85, 'rpe': 9.0},
               ],
             },
           ],
@@ -34,17 +33,6 @@ void main() {
           'name': 'Bench Press',
           'primary_muscle': 'chest',
           'secondary_muscles': ['triceps', 'front_delts'],
-        },
-      ],
-      templates: [
-        {
-          'name': 'Push day',
-          'exercises': [
-            {
-              'exercise_name': 'Bench Press',
-              'target_reps': '6-10',
-            },
-          ],
         },
       ],
       exportedAt: DateTime.utc(2026, 3, 15, 10, 20),
@@ -65,24 +53,17 @@ void main() {
     expect(exercise['name'], 'Bench Press');
     expect(exercise['primary_muscle'], 'chest');
     expect(exercise['secondary_muscles'], ['triceps', 'front_delts']);
-    expect(exercise['volume'], 1320);
-    expect(exercise['best_set'], {'reps': 8, 'weight': 85});
-    expect(exercise['progress_snapshot'], isNotNull);
-
-    final progress = export['exercise_progress'] as List<dynamic>;
-    final benchProgress = progress.single as Map<String, dynamic>;
-    expect(benchProgress['exercise_name'], 'Bench Press');
-    expect(benchProgress['decision'], 'insufficientData');
-    expect(benchProgress['recommended_next_weight'], 85);
+    expect(exercise['best_set'], {'reps': 8, 'weight': 85, 'rpe': 9});
     expect(
-      benchProgress['rep_range'],
-      {
-        'lower': 6,
-        'upper': 10,
-        'label': '6-10',
-        'source': '6-10',
-      },
+      exercise['sets'],
+      [
+        {'set_index': 1, 'reps': 8, 'weight': 80, 'rpe': 8.5},
+        {'set_index': 2, 'reps': 8, 'weight': 85, 'rpe': 9},
+      ],
     );
+    expect(export.containsKey('exercise_progress'), isFalse);
+    expect(exercise.containsKey('progress_snapshot'), isFalse);
+    expect(exercise.containsKey('volume'), isFalse);
   });
 
   test(
@@ -110,7 +91,6 @@ void main() {
       rangeFrom: DateTime(2026, 3, 10),
       rangeTo: DateTime(2026, 3, 10),
       exerciseCatalog: const [],
-      templates: const [],
       exportedAt: DateTime.utc(2026, 3, 15, 10, 20),
     );
 
@@ -119,11 +99,11 @@ void main() {
     final exercise =
         (workout['exercises'] as List<dynamic>).single as Map<String, dynamic>;
 
-    expect(exercise['volume'], 30);
     expect(exercise['best_set'], {'reps': 12, 'weight': null});
     expect(exercise['primary_muscle'], isNull);
     expect(exercise['secondary_muscles'], isEmpty);
-    expect(exercise['progress_snapshot'], isNull);
+    expect(exercise.containsKey('progress_snapshot'), isFalse);
+    expect(exercise.containsKey('volume'), isFalse);
     expect(workout['duration_minutes'], isNull);
   });
 
@@ -139,8 +119,8 @@ void main() {
               {
                 "name": "Bench Press",
                 "sets": [
-                  {"set_index": 1, "reps": 8, "weight": 80},
-                  {"set_index": 2, "reps": 6, "weight": 85}
+                  {"set_index": 1, "reps": 8, "weight": 80, "rpe": 8.5},
+                  {"set_index": 2, "reps": 6, "weight": 85, "rpe": 9.0}
                 ]
               }
             ]
@@ -168,6 +148,8 @@ void main() {
     expect(sets.first['position'], 1);
     expect(sets.first['reps'], 8);
     expect(sets.first['weight'], 80);
+    expect(sets.first['rpe'], 8.5);
+    expect(sets.last['rpe'], 9.0);
   });
 
   test('parseImportWorkouts supports backend export shape too', () {
@@ -183,7 +165,7 @@ void main() {
               {
                 "exercise_name": "Pull Up",
                 "sets": [
-                  {"position": 1, "reps": 10, "weight": null}
+                  {"position": 1, "reps": 10, "weight": null, "rpe": 7.5}
                 ]
               }
             ]
@@ -200,5 +182,7 @@ void main() {
     expect(workout.exercises.single['exercise_name'], 'Pull Up');
     expect(
         (workout.exercises.single['sets'] as List<dynamic>).single['reps'], 10);
+    expect(
+        (workout.exercises.single['sets'] as List<dynamic>).single['rpe'], 7.5);
   });
 }

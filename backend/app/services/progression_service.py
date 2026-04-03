@@ -114,6 +114,7 @@ class WeeklyWorkoutEventData:
     week_key: str
     count: int
     performed_at: datetime
+    workout_name: str = ''
 
 
 _WEEKLY_ORDINALS = ['первую', 'вторую', 'третью', 'четвёртую', 'пятую', 'шестую', 'седьмую']
@@ -343,11 +344,12 @@ class ProgressionService:
                 if weekly.count <= len(_WEEKLY_ORDINALS)
                 else f'{weekly.count}-ю'
             )
+            name_part = f' "{weekly.workout_name}"' if weekly.workout_name else ''
             events.log_once(
                 user_id=user_id,
                 event_key=f'weekly_workout:{weekly.week_key}:{weekly.count}',
                 event_type='weekly_workout',
-                description=f'Завершил {ordinal} тренировку на неделе.',
+                description=f'Завершил {ordinal} тренировку на неделе{name_part}.',
                 created_at=now,
             )
 
@@ -439,6 +441,7 @@ class _ProgressionCalculator:
                     week_key=wk,
                     count=self._week_counts[wk],
                     performed_at=performed_at,
+                    workout_name=workout.name or '',
                 )
             )
 

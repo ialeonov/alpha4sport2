@@ -93,6 +93,34 @@ void main() {
       expect(analysis.deltaWeight, 0);
     });
 
+    test('keeps weight when upper range is reached with too high RPE', () {
+      final report = service.buildReport(
+        workouts: [
+          _workoutWithSets('2026-03-01T10:00:00Z', 'Bench Press', [
+            _set(weight: 75, reps: 7, rpe: 8.5),
+            _set(weight: 75, reps: 7, rpe: 8.5),
+            _set(weight: 75, reps: 7, rpe: 8.5),
+          ]),
+          _workoutWithSets('2026-03-05T10:00:00Z', 'Bench Press', [
+            _set(weight: 75, reps: 8, rpe: 9.5),
+            _set(weight: 75, reps: 8, rpe: 9.5),
+            _set(weight: 75, reps: 8, rpe: 9.5),
+          ]),
+          _workoutWithSets('2026-03-09T10:00:00Z', 'Bench Press', [
+            _set(weight: 75, reps: 8, rpe: 9.5),
+            _set(weight: 75, reps: 8, rpe: 9.5),
+            _set(weight: 75, reps: 8, rpe: 9.5),
+          ]),
+        ],
+        templates: [_template('Bench Press', '6-8')],
+      );
+
+      final analysis = report.allExercises.single;
+      expect(analysis.decision, ProgressDecision.keep);
+      expect(analysis.recommendedNextWeight, 75);
+      expect(analysis.reason, contains('RPE'));
+    });
+
     test('returns decrease when user misses lower bound and metrics worsen',
         () {
       final report = service.buildReport(
@@ -109,6 +137,33 @@ void main() {
       expect(analysis.recommendedNextWeight, 70);
       expect(analysis.deltaWeight, -5);
       expect(analysis.isStalled, isTrue);
+    });
+
+    test('uses high RPE as extra confirmation for decrease', () {
+      final report = service.buildReport(
+        workouts: [
+          _workoutWithSets('2026-03-01T10:00:00Z', 'Squat', [
+            _set(weight: 80, reps: 5, rpe: 9.0),
+            _set(weight: 80, reps: 5, rpe: 9.0),
+            _set(weight: 80, reps: 5, rpe: 9.0),
+          ]),
+          _workoutWithSets('2026-03-05T10:00:00Z', 'Squat', [
+            _set(weight: 75, reps: 5, rpe: 9.5),
+            _set(weight: 75, reps: 5, rpe: 9.5),
+            _set(weight: 75, reps: 5, rpe: 9.5),
+          ]),
+          _workoutWithSets('2026-03-09T10:00:00Z', 'Squat', [
+            _set(weight: 75, reps: 4, rpe: 9.5),
+            _set(weight: 75, reps: 4, rpe: 9.5),
+            _set(weight: 75, reps: 4, rpe: 9.5),
+          ]),
+        ],
+        templates: [_template('Squat', '6-8')],
+      );
+
+      final analysis = report.allExercises.single;
+      expect(analysis.decision, ProgressDecision.decrease);
+      expect(analysis.reason, contains('RPE'));
     });
 
     test(
@@ -135,10 +190,12 @@ void main() {
 Map<String, dynamic> _set({
   required double weight,
   required int reps,
+  double? rpe,
 }) {
   return {
     'reps': reps,
     'weight': weight,
+    'rpe': rpe,
   };
 }
 

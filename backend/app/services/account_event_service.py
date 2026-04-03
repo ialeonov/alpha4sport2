@@ -36,7 +36,7 @@ class AccountEventService:
         self.db = db
 
     # Event types that are hidden from the social feed
-    _HIDDEN_FROM_FEED = frozenset({'avatar_updated', 'pr_volume', 'workout_volume_bonus'})
+    _HIDDEN_FROM_FEED = frozenset({'avatar_updated', 'pr_volume', 'workout_volume_bonus', 'workout_completed'})
 
     @staticmethod
     def _is_feed_event(column) -> object:
@@ -150,6 +150,7 @@ class AccountEventService:
                 select(AccountEvent)
                 .where(self._is_feed_event(AccountEvent.event_type))
                 .where(~AccountEvent.event_key.like('%:pr_volume'))
+                .where(~AccountEvent.event_key.like('%:volume'))
                 .order_by(AccountEvent.created_at.desc(), AccountEvent.id.desc())
                 .limit(limit)
             )

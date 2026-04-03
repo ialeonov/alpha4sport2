@@ -159,13 +159,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     try {
       final exerciseCatalog = await _workoutExportService.loadExerciseCatalog();
-      final templates = await _workoutExportService.loadTemplates();
       final exportData = _workoutExportService.buildExport(
         workouts: selectedWorkouts,
         rangeFrom: pickedRange.start,
         rangeTo: pickedRange.end,
         exerciseCatalog: exerciseCatalog,
-        templates: templates,
       );
       final saved = await _workoutExportService.saveExportJson(
         exportData: exportData,

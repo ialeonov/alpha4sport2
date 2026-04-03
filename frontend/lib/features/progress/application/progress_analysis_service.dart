@@ -48,9 +48,7 @@ class ProgressAnalysisService {
     List<Map<String, dynamic>> templates,
   ) {
     final repRanges = _resolveRepRanges(templates);
-    // Groups sessions by a canonical key: 'c:<catalogId>' or 'n:<exerciseName>'.
     final grouped = <String, List<ExerciseSessionPerformance>>{};
-    // Tracks the latest name seen for each canonical key (for renaming support).
     final latestNameByKey = <String, String>{};
     final latestDateByKey = <String, DateTime>{};
 
@@ -77,7 +75,6 @@ class ProgressAnalysisService {
             ? 'c:$catalogId'
             : 'n:${_normalizeExerciseLookupName(exerciseName)}';
 
-        // Keep the name from the most recent workout for this group.
         final prevDate = latestDateByKey[canonicalKey];
         if (prevDate == null || performedAt.isAfter(prevDate)) {
           latestDateByKey[canonicalKey] = performedAt;
@@ -108,7 +105,6 @@ class ProgressAnalysisService {
       sessions.sort((a, b) => a.performedAt.compareTo(b.performedAt));
     }
 
-    // Remap canonical keys to the latest exercise name.
     final result = <String, List<ExerciseSessionPerformance>>{};
     for (final entry in grouped.entries) {
       final name = latestNameByKey[entry.key] ?? entry.key;
@@ -127,6 +123,7 @@ class ProgressAnalysisService {
     ExerciseSetPerformance? topSet;
     var totalSets = 0;
     var setsAtWorkingWeight = 0;
+    final rpeAtWorkingWeight = <double>[];
 
     for (final rawSet in sets) {
       final set = (rawSet as Map).cast<String, dynamic>();
@@ -174,6 +171,11 @@ class ProgressAnalysisService {
       }
 
       setsAtWorkingWeight += 1;
+      final rpeValue = set['rpe'];
+      final rpe = rpeValue is num ? rpeValue.toDouble() : null;
+      if (rpe != null && rpe >= 0 && rpe <= 10) {
+        rpeAtWorkingWeight.add(rpe);
+      }
     }
 
     return ExerciseSessionPerformance(
@@ -182,6 +184,10 @@ class ProgressAnalysisService {
       workingSet: topSet,
       totalSets: totalSets,
       setsAtWorkingWeight: setsAtWorkingWeight,
+      averageRpeAtWorkingWeight: rpeAtWorkingWeight.isEmpty
+          ? null
+          : rpeAtWorkingWeight.reduce((a, b) => a + b) /
+              rpeAtWorkingWeight.length,
       hitUpperBound: topSet.reps >= repRange.upper,
       missedLowerBound: topSet.reps < repRange.lower,
     );
@@ -193,7 +199,8 @@ class ProgressAnalysisService {
     List<Map<String, dynamic>> templates,
   ) {
     final repRange =
-        _resolveRepRanges(templates)[exerciseName] ?? defaultRepRange;
+        _resolveRepRanges(templates)[_normalizeExerciseLookupName(exerciseName)] ??
+            defaultRepRange;
     final recent =
         sessions.length <= 5 ? sessions : sessions.sublist(sessions.length - 5);
     final latest = recent.last;
@@ -227,11 +234,15 @@ class ProgressAnalysisService {
     );
     final currentWeight = latest.workingSet.weight;
     final consistency = _consistencyScore(lastThree);
+    final rpeSignal = _buildRpeSignal(lastThree);
     final plateau = upperHits == 0 &&
         normalizedTrend.abs() <= 0.015 &&
         oneRmTrend.abs() <= 0.015;
 
-    if (upperHits >= 2 && normalizedTrend >= -0.02 && oneRmTrend >= -0.02) {
+    if (upperHits >= 2 &&
+        normalizedTrend >= -0.02 &&
+        oneRmTrend >= -0.02 &&
+        rpeSignal.allowsIncrease) {
       final nextWeight = roundWeight(currentWeight + step, step: step);
       return ExerciseProgressAnalysis(
         exerciseName: exerciseName,
@@ -239,29 +250,43 @@ class ProgressAnalysisService {
         decision: ProgressDecision.increase,
         recommendedNextWeight: nextWeight,
         deltaWeight: roundWeight(nextWeight - currentWeight, step: 0.5),
-        confidenceScore:
-            _roundScore(0.72 + consistency * 0.2 + _dataBonus(recent.length)),
-        reason:
-            'Последние 3 тренировки уверенно закрывают верх диапазона ${repRange.label}.',
+        confidenceScore: _roundScore(
+          0.72 +
+              consistency * 0.2 +
+              _dataBonus(recent.length) +
+              rpeSignal.confidenceAdjustment,
+        ),
+        reason: rpeSignal.hasData
+            ? 'Последние 3 тренировки уверенно закрывают верх диапазона ${repRange.label}, и RPE еще остается контролируемым.'
+            : 'Последние 3 тренировки уверенно закрывают верх диапазона ${repRange.label}.',
         sessions: recent,
         isStalled: false,
       );
     }
 
-    if (lowerMisses >= 2 && normalizedTrend <= -0.04 && oneRmTrend <= -0.04) {
+    if (lowerMisses >= 2 &&
+        normalizedTrend <= -0.04 &&
+        oneRmTrend <= -0.04 &&
+        rpeSignal.supportsDecrease) {
       final nextWeight = roundWeight(
-          (currentWeight - step).clamp(0, double.infinity),
-          step: step);
+        (currentWeight - step).clamp(0, double.infinity),
+        step: step,
+      );
       return ExerciseProgressAnalysis(
         exerciseName: exerciseName,
         repRange: repRange,
         decision: ProgressDecision.decrease,
         recommendedNextWeight: nextWeight,
         deltaWeight: roundWeight(nextWeight - currentWeight, step: 0.5),
-        confidenceScore:
-            _roundScore(0.66 + consistency * 0.16 + _dataBonus(recent.length)),
-        reason:
-            'Повторы ниже ${repRange.lower}, а сила и нормализованный вес просели.',
+        confidenceScore: _roundScore(
+          0.66 +
+              consistency * 0.16 +
+              _dataBonus(recent.length) +
+              rpeSignal.confidenceAdjustment,
+        ),
+        reason: rpeSignal.hasData
+            ? 'Повторы ниже ${repRange.lower}, сила просела, а RPE показывает, что рабочий вес стал слишком тяжелым.'
+            : 'Повторы ниже ${repRange.lower}, а сила и нормализованный вес просели.',
         sessions: recent,
         isStalled: true,
       );
@@ -271,9 +296,11 @@ class ProgressAnalysisService {
         (upperHits < 2 &&
             normalizedTrend.abs() <= 0.015 &&
             oneRmTrend.abs() <= 0.015);
-    final reason = isStalled
-        ? 'Прогресс застопорился: верх диапазона пока не стабилен.'
-        : 'Вес пока лучше оставить: верх диапазона ${repRange.label} еще не закреплен.';
+    final reason = rpeSignal.blocksIncreaseBecauseTooHard
+        ? 'Вес пока лучше оставить: верх диапазона близко, но RPE уже слишком высокий.'
+        : (isStalled
+            ? 'Прогресс застопорился: верх диапазона пока не стабилен.'
+            : 'Вес пока лучше оставить: верх диапазона ${repRange.label} еще не закреплен.');
 
     return ExerciseProgressAnalysis(
       exerciseName: exerciseName,
@@ -281,8 +308,12 @@ class ProgressAnalysisService {
       decision: ProgressDecision.keep,
       recommendedNextWeight: currentWeight,
       deltaWeight: 0,
-      confidenceScore:
-          _roundScore(0.58 + consistency * 0.14 + _dataBonus(recent.length)),
+      confidenceScore: _roundScore(
+        0.58 +
+            consistency * 0.14 +
+            _dataBonus(recent.length) +
+            rpeSignal.confidenceAdjustment,
+      ),
       reason: reason,
       sessions: recent,
       isStalled: isStalled,
@@ -389,6 +420,57 @@ class ProgressAnalysisService {
   double _roundScore(double value) {
     return double.parse(value.clamp(0, 0.99).toStringAsFixed(2));
   }
+}
+
+_RpeSignal _buildRpeSignal(List<ExerciseSessionPerformance> sessions) {
+  final values = sessions
+      .map((item) => item.averageRpeAtWorkingWeight)
+      .whereType<double>()
+      .toList();
+  if (values.isEmpty) {
+    return const _RpeSignal(
+      hasData: false,
+      allowsIncrease: true,
+      supportsDecrease: true,
+      blocksIncreaseBecauseTooHard: false,
+      confidenceAdjustment: 0,
+    );
+  }
+
+  final average = values.reduce((a, b) => a + b) / values.length;
+
+  var confidenceAdjustment = 0.0;
+  if (average <= 8.5) {
+    confidenceAdjustment = 0.04;
+  } else if (average > 9.0 && average < 9.3) {
+    confidenceAdjustment = -0.03;
+  } else if (average >= 9.5) {
+    confidenceAdjustment = 0.03;
+  }
+
+  return _RpeSignal(
+    hasData: true,
+    allowsIncrease: average <= 9.0,
+    supportsDecrease: average >= 9.3,
+    blocksIncreaseBecauseTooHard: average > 9.0,
+    confidenceAdjustment: confidenceAdjustment,
+  );
+}
+
+class _RpeSignal {
+  const _RpeSignal({
+    required this.hasData,
+    required this.allowsIncrease,
+    required this.supportsDecrease,
+    required this.blocksIncreaseBecauseTooHard,
+    required this.confidenceAdjustment,
+  });
+
+  final bool hasData;
+  final bool allowsIncrease;
+  final bool supportsDecrease;
+  final bool blocksIncreaseBecauseTooHard;
+  final double confidenceAdjustment;
 }
 
 String _normalizeExerciseLookupName(String value) {

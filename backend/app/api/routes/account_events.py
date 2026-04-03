@@ -17,7 +17,7 @@ def list_account_events(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, 100))
     return AccountEventService(db).list_events(limit=limit, current_user_id=current_user.id)
 
 

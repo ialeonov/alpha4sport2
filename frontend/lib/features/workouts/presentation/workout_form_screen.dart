@@ -818,7 +818,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           'position': setIndex + 1,
           'reps': reps,
           'weight': weight,
-          'rpe': null,
+          'rpe': set.rpe,
           'notes': null,
         });
       }
@@ -1797,6 +1797,7 @@ class _SetDraft {
     required this.repsController,
     required this.weightController,
     required this.containerKey,
+    this.rpe,
   });
 
   factory _SetDraft.empty() {
@@ -1813,6 +1814,7 @@ class _SetDraft {
       weightController:
           TextEditingController(text: source.weightController.text),
       containerKey: GlobalKey(),
+      rpe: source.rpe,
     );
   }
 
@@ -1824,12 +1826,14 @@ class _SetDraft {
         text: map['weight'] == null ? '' : map['weight'].toString(),
       ),
       containerKey: GlobalKey(),
+      rpe: map['rpe'] == null ? null : (map['rpe'] as num).toDouble(),
     );
   }
 
   final TextEditingController repsController;
   final TextEditingController weightController;
   final GlobalKey containerKey;
+  double? rpe;
 
   void dispose() {
     repsController.dispose();
@@ -2020,6 +2024,23 @@ class _WorkoutSetRow extends StatelessWidget {
             ),
             if (isMobile) Expanded(child: repsField) else repsField,
             if (!isMobile) const Spacer(),
+            const SizedBox(width: 8),
+            _RpeChip(
+              rpe: set.rpe,
+              onTap: () {
+                showModalBottomSheet<void>(
+                  context: context,
+                  useRootNavigator: true,
+                  builder: (_) => _RpePickerSheet(
+                    currentRpe: set.rpe,
+                    onSelected: (value) {
+                      set.rpe = value;
+                      onChanged();
+                    },
+                  ),
+                );
+              },
+            ),
             if (onDelete != null)
               IconButton(
                 onPressed: onDelete,
@@ -2094,6 +2115,212 @@ class _CompactSetField extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── RPE helpers ──────────────────────────────────────────────────────────────
+
+Color _rpeColor(double rpe) {
+  if (rpe <= 6.0) return const Color(0xFF43A047); // green
+  if (rpe <= 6.5) return const Color(0xFF66BB6A); // light green
+  if (rpe <= 7.0) return const Color(0xFF9CCC65); // lime green
+  if (rpe <= 7.5) return const Color(0xFFD4E157); // lime
+  if (rpe <= 8.0) return const Color(0xFFFFCA28); // amber
+  if (rpe <= 8.5) return const Color(0xFFFFA726); // orange
+  if (rpe <= 9.0) return const Color(0xFFFF7043); // deep orange
+  if (rpe <= 9.5) return const Color(0xFFEF5350); // red
+  return const Color(0xFFC62828); // dark red for 10
+}
+
+class _RpeChip extends StatelessWidget {
+  const _RpeChip({required this.rpe, required this.onTap});
+
+  final double? rpe;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasValue = rpe != null;
+    final color = hasValue ? _rpeColor(rpe!) : scheme.onSurfaceVariant;
+    final bgColor = hasValue
+        ? _rpeColor(rpe!).withValues(alpha: 0.15)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.6);
+    final borderColor = hasValue
+        ? _rpeColor(rpe!).withValues(alpha: 0.5)
+        : scheme.outlineVariant.withValues(alpha: 0.4);
+    final label = hasValue
+        ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}'
+        : '@—';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: color,
+                fontSize: 13,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RpePickerSheet extends StatelessWidget {
+  const _RpePickerSheet({
+    required this.currentRpe,
+    required this.onSelected,
+  });
+
+  final double? currentRpe;
+  final ValueChanged<double?> onSelected;
+
+  static const _values = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                color: scheme.outlineVariant,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Text(
+                  'RPE подхода',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const Spacer(),
+                if (currentRpe != null)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onSelected(null);
+                    },
+                    child: Text(
+                      'Сбросить',
+                      style: TextStyle(color: scheme.error),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Оценка воспринимаемой нагрузки (Rate of Perceived Exertion)',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.5,
+              ),
+              itemCount: _values.length,
+              itemBuilder: (context, i) {
+                final value = _values[i];
+                final color = _rpeColor(value);
+                final isSelected = currentRpe == value;
+                final label =
+                    value % 1 == 0 ? value.toInt().toString() : value.toString();
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    onSelected(value);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? color.withValues(alpha: 0.25)
+                          : color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected
+                            ? color
+                            : color.withValues(alpha: 0.4),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: color,
+                          ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            _RpeScaleHint(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RpeScaleHint extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          '6 — легко',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: _rpeColor(6.0),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        Text(
+          '8 — тяжело',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: _rpeColor(8.0),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        Text(
+          '10 — максимум',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: _rpeColor(10.0),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ],
     );
   }
 }

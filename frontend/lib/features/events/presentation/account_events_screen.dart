@@ -24,7 +24,7 @@ class _AccountEventsScreenState extends State<AccountEventsScreen> {
   }
 
   Future<List<_AccountEventItem>> _load() async {
-    final items = await BackendApi.getAccountEvents(limit: 20);
+    final items = await BackendApi.getAccountEvents(limit: 50);
     return items.map(_AccountEventItem.fromJson).toList();
   }
 

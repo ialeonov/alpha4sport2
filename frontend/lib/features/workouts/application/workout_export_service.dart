@@ -5,16 +5,9 @@ import 'package:file_selector/file_selector.dart';
 
 import '../../../core/network/backend_api.dart';
 import '../../../core/storage/local_cache.dart';
-import '../../progress/application/progress_analysis_service.dart';
-import '../../progress/domain/progress_models.dart';
 
 class WorkoutExportService {
-  const WorkoutExportService({
-    ProgressAnalysisService progressAnalysisService =
-        const ProgressAnalysisService(),
-  }) : _progressAnalysisService = progressAnalysisService;
-
-  final ProgressAnalysisService _progressAnalysisService;
+  const WorkoutExportService();
 
   Future<List<Map<String, dynamic>>> loadExerciseCatalog() async {
     try {
@@ -51,7 +44,6 @@ class WorkoutExportService {
     required DateTime rangeFrom,
     required DateTime rangeTo,
     required List<Map<String, dynamic>> exerciseCatalog,
-    List<Map<String, dynamic>> templates = const [],
     DateTime? exportedAt,
   }) {
     final catalogById = <int, Map<String, dynamic>>{};
@@ -74,14 +66,6 @@ class WorkoutExportService {
         final bStartedAt = _parseDateTime(b['started_at']) ?? DateTime(1970);
         return aStartedAt.compareTo(bStartedAt);
       });
-    final progressReport = _progressAnalysisService.buildReport(
-      workouts: normalizedWorkouts,
-      templates: templates,
-    );
-    final analysisByExercise = {
-      for (final analysis in progressReport.allExercises)
-        analysis.exerciseName: analysis,
-    };
 
     return {
       'exported_at': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
@@ -89,16 +73,12 @@ class WorkoutExportService {
         'from': _formatDate(rangeFrom),
         'to': _formatDate(rangeTo),
       },
-      'exercise_progress': progressReport.allExercises
-          .map(_buildExerciseProgressExport)
-          .toList(),
       'workouts': normalizedWorkouts
           .map(
             (workout) => _buildWorkoutExport(
               workout: workout,
               catalogById: catalogById,
               catalogByName: catalogByName,
-              analysisByExercise: analysisByExercise,
             ),
           )
           .toList(),
@@ -316,7 +296,7 @@ class WorkoutExportService {
             _normalizeInt(set['position'] ?? set['set_index']) ?? setIndex + 1,
         'reps': _normalizeInt(set['reps']) ?? 0,
         'weight': _normalizeNumber(set['weight']),
-        'rpe': null,
+        'rpe': _normalizeNumber(set['rpe']),
         'notes': importedNote.isEmpty ? null : importedNote,
       });
     }
@@ -347,7 +327,6 @@ class WorkoutExportService {
     required Map<String, dynamic> workout,
     required Map<int, Map<String, dynamic>> catalogById,
     required Map<String, Map<String, dynamic>> catalogByName,
-    required Map<String, ExerciseProgressAnalysis> analysisByExercise,
   }) {
     final startedAt = _parseDateTime(workout['started_at']);
     final finishedAt = _parseDateTime(workout['finished_at']);
@@ -369,8 +348,6 @@ class WorkoutExportService {
                 catalogById: catalogById,
                 catalogByName: catalogByName,
               ),
-              progressAnalysis: analysisByExercise[
-                  (exercise['exercise_name'] ?? '').toString().trim()],
             ),
           )
           .toList(),
@@ -380,12 +357,10 @@ class WorkoutExportService {
   Map<String, dynamic> _buildExerciseExport({
     required Map<String, dynamic> exercise,
     required Map<String, dynamic>? catalogEntry,
-    required ExerciseProgressAnalysis? progressAnalysis,
   }) {
     final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
     final exportedSets = <Map<String, dynamic>>[];
     Map<String, dynamic>? bestSet;
-    var volume = 0.0;
 
     for (var index = 0; index < sets.length; index++) {
       final rawSet = sets[index];
@@ -396,17 +371,18 @@ class WorkoutExportService {
       final set = rawSet.cast<String, dynamic>();
       final reps = _normalizeNumber(set['reps']);
       final weight = _normalizeNumber(set['weight']);
+      final rpe = _normalizeNumber(set['rpe']);
       final setIndex = _normalizeInt(set['position']) ?? index + 1;
       final setNotes = (set['notes'] ?? '').toString().trim();
       final exportedSet = {
         'set_index': setIndex,
         'reps': reps,
         'weight': weight,
+        'rpe': rpe,
         if (setNotes.isNotEmpty) 'notes': setNotes,
       };
 
       exportedSets.add(exportedSet);
-      volume += _calculateSetVolume(reps: reps, weight: weight);
       bestSet = _pickBestSet(current: bestSet, candidate: exportedSet);
     }
 
@@ -431,52 +407,8 @@ class WorkoutExportService {
           : {
               'reps': bestSet['reps'],
               'weight': bestSet['weight'],
+              if (bestSet['rpe'] != null) 'rpe': bestSet['rpe'],
             },
-      'volume': _normalizeNumber(volume),
-      'progress_snapshot': progressAnalysis == null
-          ? null
-          : _buildExerciseProgressExport(progressAnalysis),
-    };
-  }
-
-  Map<String, dynamic> _buildExerciseProgressExport(
-    ExerciseProgressAnalysis analysis,
-  ) {
-    return {
-      'exercise_name': analysis.exerciseName,
-      'rep_range': {
-        'lower': analysis.repRange.lower,
-        'upper': analysis.repRange.upper,
-        'label': analysis.repRange.label,
-        'source': analysis.repRange.source,
-      },
-      'decision': analysis.decision.name,
-      'recommended_next_weight':
-          _normalizeNumber(analysis.recommendedNextWeight),
-      'delta_weight': _normalizeNumber(analysis.deltaWeight),
-      'confidence_score': _normalizeNumber(analysis.confidenceScore),
-      'is_stalled': analysis.isStalled,
-      'reason': analysis.reason,
-      'sessions': analysis.sessions.map(_buildExerciseSessionExport).toList(),
-    };
-  }
-
-  Map<String, dynamic> _buildExerciseSessionExport(
-    ExerciseSessionPerformance session,
-  ) {
-    return {
-      'date': _formatDate(session.performedAt),
-      'working_set': {
-        'weight': _normalizeNumber(session.workingSet.weight),
-        'reps': session.workingSet.reps,
-        'estimated_1rm': _normalizeNumber(session.workingSet.estimated1rm),
-        'normalized_weight':
-            _normalizeNumber(session.workingSet.normalizedWeight),
-      },
-      'total_sets': session.totalSets,
-      'sets_at_working_weight': session.setsAtWorkingWeight,
-      'hit_upper_bound': session.hitUpperBound,
-      'missed_lower_bound': session.missedLowerBound,
     };
   }
 

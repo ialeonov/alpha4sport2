@@ -42,6 +42,7 @@ class ExerciseSessionPerformance {
     required this.workingSet,
     required this.totalSets,
     required this.setsAtWorkingWeight,
+    required this.averageRpeAtWorkingWeight,
     required this.hitUpperBound,
     required this.missedLowerBound,
   });
@@ -51,6 +52,7 @@ class ExerciseSessionPerformance {
   final ExerciseSetPerformance workingSet;
   final int totalSets;
   final int setsAtWorkingWeight;
+  final double? averageRpeAtWorkingWeight;
   final bool hitUpperBound;
   final bool missedLowerBound;
 }
