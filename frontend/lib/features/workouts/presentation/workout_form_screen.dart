@@ -764,7 +764,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               'position': setIndex + 1,
               'reps': int.tryParse(set.repsController.text.trim()) ?? 0,
               'weight': _parseWeight(set.weightController.text),
-              'rpe': null,
+              'rpe': set.rpe,
               'notes': null,
             };
           }),
@@ -1235,11 +1235,6 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                       color: scheme.onSurfaceVariant,
                       icon: Icons.calendar_today_outlined,
                     ),
-                  ),
-                  StatusBadge(
-                    label: _saveStatusLabel(),
-                    color: _saveStatusColor(scheme),
-                    icon: Icons.cloud_done_outlined,
                   ),
                   StatusBadge(
                     label: _isFinished ? 'Завершена' : 'В работе',
@@ -2157,8 +2152,8 @@ class _RpeChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        width: 52,
         height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(10),
