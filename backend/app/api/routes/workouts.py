@@ -131,7 +131,13 @@ def start_from_template(
                 position=tpl_exercise.position,
                 notes=None,
                 sets=[
-                    ExerciseSet(position=i + 1, reps=0, weight=None, rpe=None, notes=None)
+                    ExerciseSet(
+                        position=i + 1,
+                        reps=0,
+                        weight=tpl_exercise.target_weight,
+                        rpe=None,
+                        notes=None,
+                    )
                     for i in range(sets_count)
                 ],
             )

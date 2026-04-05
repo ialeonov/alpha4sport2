@@ -386,31 +386,37 @@ class _TodayScreenState extends State<TodayScreen> {
       final lastSets =
           (lastExercise?['sets'] as List?)?.cast<dynamic>() ?? const [];
 
+      final targetSets = (templateExercise['target_sets'] as int?) ?? 3;
+      final targetWeight = templateExercise['target_weight'];
+
+      // Determine reps hint: parse target_reps from template (e.g. "8" or "6-10")
+      int repsHint = 8;
+      final rawReps = (templateExercise['target_reps'] ?? '').toString().trim();
+      if (rawReps.contains('-')) {
+        final parts = rawReps.split('-');
+        repsHint = int.tryParse(parts.last.trim()) ?? 8;
+      } else if (rawReps.isNotEmpty) {
+        repsHint = int.tryParse(rawReps) ?? 8;
+      } else if (lastSets.isNotEmpty) {
+        // Fall back to last session's reps as hint (but NOT weight)
+        final lastSet = (lastSets.last as Map).cast<String, dynamic>();
+        repsHint = (lastSet['reps'] as int?) ?? 8;
+      }
+
       prepared.add({
         'catalog_exercise_id': templateExercise['catalog_exercise_id'],
         'exercise_name': (templateExercise['exercise_name'] ?? '').toString(),
         'position': index + 1,
         'notes': null,
-        'sets': lastSets.isEmpty
-            ? [
-                {
-                  'position': 1,
-                  'reps': 8,
-                  'weight': null,
-                  'rpe': null,
-                  'notes': null,
-                },
-              ]
-            : List.generate(lastSets.length, (setIndex) {
-                final set = (lastSets[setIndex] as Map).cast<String, dynamic>();
-                return {
-                  'position': setIndex + 1,
-                  'reps': set['reps'] ?? 8,
-                  'weight': set['weight'],
-                  'rpe': null,
-                  'notes': null,
-                };
-              }),
+        'sets': List.generate(targetSets, (setIndex) {
+          return {
+            'position': setIndex + 1,
+            'reps': repsHint,
+            'weight': targetWeight,
+            'rpe': null,
+            'notes': null,
+          };
+        }),
       });
     }
 

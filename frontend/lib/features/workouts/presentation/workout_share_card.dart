@@ -145,7 +145,7 @@ class WorkoutShareCard extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   // ── Exercise list ──────────────────────────────────
-                  _buildSectionLabel('УПРАЖНЕНИЯ'),
+                  _buildSectionLabel('УПРАЖНЕНИЯ · ЛУЧШИЙ ПОДХОД'),
                   const SizedBox(height: 8),
                   _buildExerciseList(exercises),
 

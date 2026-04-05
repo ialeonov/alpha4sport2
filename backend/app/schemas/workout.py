@@ -61,6 +61,7 @@ class TemplateExerciseIn(BaseModel):
     position: int = Field(ge=1)
     target_sets: int = Field(default=3, ge=1)
     target_reps: str | None = Field(default=None, max_length=40)
+    target_weight: float | None = Field(default=None, ge=0)
 
 
 class TemplateExerciseOut(TemplateExerciseIn):
@@ -79,6 +80,14 @@ class TemplateOut(BaseModel):
     id: int
     name: str
     notes: str | None
+    exercises: list[TemplateExerciseOut]
+    share_token: str | None = None
+
+    model_config = {'from_attributes': True}
+
+
+class TemplateSharedOut(BaseModel):
+    name: str
     exercises: list[TemplateExerciseOut]
 
     model_config = {'from_attributes': True}

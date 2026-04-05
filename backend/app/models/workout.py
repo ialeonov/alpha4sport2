@@ -62,6 +62,7 @@ class WorkoutTemplate(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
 
     exercises: Mapped[list['WorkoutTemplateExercise']] = relationship(
         back_populates='template', cascade='all, delete-orphan', order_by='WorkoutTemplateExercise.position'
@@ -81,6 +82,7 @@ class WorkoutTemplateExercise(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     target_sets: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     target_reps: Mapped[str | None] = mapped_column(String(40))
+    target_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     template: Mapped[WorkoutTemplate] = relationship(back_populates='exercises')
 

@@ -391,21 +391,17 @@ class BackendApi {
   static Future<Map<String, dynamic>> createTemplate({
     required String name,
     required List<Map<String, dynamic>> exercises,
+    String? notes,
+    List<Map<String, dynamic>>? templateExercises,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final payload = {
         'name': name,
-        'notes': null,
-        'exercises': List.generate(
-          exercises.length,
-          (i) => {
-            'catalog_exercise_id': exercises[i]['id'],
-            'exercise_name': (exercises[i]['name'] ?? '').toString(),
-            'position': i + 1,
-            'target_sets': 3,
-            'target_reps': '6-10',
-          },
+        'notes': notes,
+        'exercises': _buildTemplateExercisesPayload(
+          exercises: exercises,
+          templateExercises: templateExercises,
         ),
       };
 
@@ -420,21 +416,17 @@ class BackendApi {
     required int templateId,
     required String name,
     required List<Map<String, dynamic>> exercises,
+    String? notes,
+    List<Map<String, dynamic>>? templateExercises,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final payload = {
         'name': name,
-        'notes': null,
-        'exercises': List.generate(
-          exercises.length,
-          (i) => {
-            'catalog_exercise_id': exercises[i]['id'],
-            'exercise_name': (exercises[i]['name'] ?? '').toString(),
-            'position': i + 1,
-            'target_sets': 3,
-            'target_reps': '6-10',
-          },
+        'notes': notes,
+        'exercises': _buildTemplateExercisesPayload(
+          exercises: exercises,
+          templateExercises: templateExercises,
         ),
       };
 
@@ -455,6 +447,51 @@ class BackendApi {
     }
   }
 
+  static Future<String> shareTemplate(int templateId) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.post('/api/v1/templates/$templateId/share');
+      return (response.data as Map)['share_token'] as String;
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось создать ссылку для шеринга.');
+    }
+  }
+
+  static Future<void> revokeTemplateShare(int templateId) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      await dio.delete('/api/v1/templates/$templateId/share');
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось отозвать доступ к шаблону.');
+    }
+  }
+
+  static Future<Map<String, dynamic>> getSharedTemplate(String token) async {
+    try {
+      final dio = _dio(_requiredBaseUrl());
+      final response = await dio.get('/api/v1/templates/shared/$token');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить шаблон по ссылке.');
+    }
+  }
+
+  static Future<Map<String, dynamic>> importSharedTemplate(
+      String token) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response =
+          await dio.post('/api/v1/templates/import/$token');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось импортировать шаблон.');
+    }
+  }
+
   static Future<Map<String, dynamic>> startWorkoutFromTemplate(
       int templateId) async {
     try {
@@ -466,6 +503,39 @@ class BackendApi {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось начать тренировку из шаблона.');
     }
+  }
+
+  static List<Map<String, dynamic>> _buildTemplateExercisesPayload({
+    required List<Map<String, dynamic>> exercises,
+    List<Map<String, dynamic>>? templateExercises,
+  }) {
+    if (templateExercises != null) {
+      return List.generate(templateExercises.length, (i) {
+        final exercise = templateExercises[i];
+        final name = (exercise['exercise_name'] ?? exercise['name'] ?? '')
+            .toString();
+        return {
+          'catalog_exercise_id':
+              exercise['catalog_exercise_id'] ?? exercise['id'],
+          'exercise_name': name,
+          'position': exercise['position'] ?? (i + 1),
+          'target_sets': exercise['target_sets'] ?? 3,
+          'target_reps': exercise['target_reps']?.toString(),
+          'target_weight': exercise['target_weight'],
+        };
+      });
+    }
+
+    return List.generate(
+      exercises.length,
+      (i) => {
+        'catalog_exercise_id': exercises[i]['id'],
+        'exercise_name': (exercises[i]['name'] ?? '').toString(),
+        'position': i + 1,
+        'target_sets': 3,
+        'target_reps': '6-10',
+      },
+    );
   }
 
   static Future<List<Map<String, dynamic>>> getExercises() async {
