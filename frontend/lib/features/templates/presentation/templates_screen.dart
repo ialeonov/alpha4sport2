@@ -1058,43 +1058,35 @@ class _SectionHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DashboardSectionLabel(title),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        const SizedBox(height: 6),
+        Text(
+          title,
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            Expanded(
-              child: Text(
-                title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800),
+            if (tertiaryActionLabel != null && onTertiaryPressed != null)
+              OutlinedButton.icon(
+                onPressed: onTertiaryPressed,
+                icon: const Icon(Icons.download_rounded),
+                label: Text(tertiaryActionLabel!),
               ),
-            ),
-            const SizedBox(width: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (tertiaryActionLabel != null && onTertiaryPressed != null)
-                  OutlinedButton.icon(
-                    onPressed: onTertiaryPressed,
-                    icon: const Icon(Icons.download_rounded),
-                    label: Text(tertiaryActionLabel!),
-                  ),
-                if (secondaryActionLabel != null && onSecondaryPressed != null)
-                  OutlinedButton.icon(
-                    onPressed: onSecondaryPressed,
-                    icon: const Icon(Icons.history_rounded),
-                    label: Text(secondaryActionLabel!),
-                  ),
-                FilledButton.icon(
-                  onPressed: onPressed,
-                  icon: const Icon(Icons.add),
-                  label: Text(actionLabel),
-                ),
-              ],
+            if (secondaryActionLabel != null && onSecondaryPressed != null)
+              OutlinedButton.icon(
+                onPressed: onSecondaryPressed,
+                icon: const Icon(Icons.history_rounded),
+                label: Text(secondaryActionLabel!),
+              ),
+            FilledButton.icon(
+              onPressed: onPressed,
+              icon: const Icon(Icons.add),
+              label: Text(actionLabel),
             ),
           ],
         ),
