@@ -54,4 +54,5 @@ class CacheKeys {
   static const bodyweightTrendCache = 'bodyweight_trend_cache';
   static const weeklyVolumeCache = 'weekly_volume_cache';
   static const activeWorkoutDraft = 'active_workout_draft';
+  static const customPrograms = 'custom_programs';
 }

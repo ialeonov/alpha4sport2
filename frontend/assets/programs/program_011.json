@@ -1,0 +1,47 @@
+{
+  "id": "program_011",
+  "name": "Развитие силы (Фалеев)",
+  "author": "Алексей Фалеев",
+  "level": "advanced",
+  "goal": "strength",
+  "gender": "any",
+  "location": "gym",
+  "days_per_week": 3,
+  "duration_weeks": 16,
+  "description": "Трёхдневная силовая программа Алексея Фалеева для лифтёров. Построена вокруг трёх соревновательных движений: присед, жим лёжа, становая тяга. Используется волнообразная периодизация нагрузки. Программа рассчитана на длительный цикл 16 недель.",
+  "workouts": [
+    {
+      "day": 1,
+      "name": "Тренировка А — Присед + Жим",
+      "exercises": [
+        { "exercise_slug": "barbell_squat", "name": "Приседания со штангой", "sets": 5, "reps": "5", "rpe": 8 },
+        { "exercise_slug": "bench_press", "name": "Жим лёжа", "sets": 5, "reps": "5", "rpe": 8 },
+        { "exercise_slug": "barbell_row", "name": "Тяга штанги в наклоне", "sets": 3, "reps": "8-10", "rpe": 7 },
+        { "exercise_slug": "triceps_pushdown", "name": "Разгибание рук на блоке", "sets": 3, "reps": "10-12", "rpe": 6 },
+        { "exercise_slug": "hyperextension", "name": "Гиперэкстензия", "sets": 3, "reps": "15-20", "rpe": 6 }
+      ]
+    },
+    {
+      "day": 2,
+      "name": "Тренировка Б — Становая + Жим стоя",
+      "exercises": [
+        { "exercise_slug": "deadlift", "name": "Становая тяга", "sets": 5, "reps": "5", "rpe": 9 },
+        { "exercise_slug": "overhead_press", "name": "Жим штанги стоя", "sets": 4, "reps": "5-6", "rpe": 8 },
+        { "exercise_slug": "wide_grip_pull_up", "name": "Подтягивания широким хватом", "sets": 4, "reps": "6-8", "rpe": 8 },
+        { "exercise_slug": "barbell_curl", "name": "Подъем штанги на бицепс", "sets": 3, "reps": "8-10", "rpe": 7 },
+        { "exercise_slug": "hyperextension", "name": "Гиперэкстензия", "sets": 3, "reps": "15-20", "rpe": 6 }
+      ]
+    },
+    {
+      "day": 3,
+      "name": "Тренировка В — Присед лёгкий + Жим тяжёлый",
+      "exercises": [
+        { "exercise_slug": "barbell_squat", "name": "Приседания со штангой (80% от раб. веса)", "sets": 4, "reps": "5", "rpe": 6 },
+        { "exercise_slug": "bench_press", "name": "Жим лёжа (тяжёлый)", "sets": 5, "reps": "3-5", "rpe": 9 },
+        { "exercise_slug": "lat_pulldown", "name": "Тяга верхнего блока к груди", "sets": 3, "reps": "8-10", "rpe": 7 },
+        { "exercise_slug": "dips", "name": "Отжимания на брусьях", "sets": 3, "reps": "8-12", "rpe": 7 },
+        { "exercise_slug": "hyperextension", "name": "Гиперэкстензия", "sets": 3, "reps": "15-20", "rpe": 6 }
+      ]
+    }
+  ]
+}

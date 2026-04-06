@@ -1,0 +1,156 @@
+{
+  "version": "1.0",
+  "total": 12,
+  "programs": [
+    {
+      "id": "program_001",
+      "file": "program_001.json",
+      "name": "ФулБоди для новичков (Вейдер)",
+      "author": "Джо Вейдер",
+      "level": "beginner",
+      "goal": "strength_mass",
+      "gender": "any",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 8
+    },
+    {
+      "id": "program_002",
+      "file": "program_002.json",
+      "name": "Вводный тренинг (Доктор Любер)",
+      "author": "Доктор Любер",
+      "level": "beginner",
+      "goal": "strength_mass",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 6
+    },
+    {
+      "id": "program_003",
+      "file": "program_003.json",
+      "name": "Женский старт: ноги и ягодицы",
+      "author": "Классическая методика",
+      "level": "beginner",
+      "goal": "body_shaping",
+      "gender": "female",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 8
+    },
+    {
+      "id": "program_004",
+      "file": "program_004.json",
+      "name": "Тренировка среднего уровня (Доктор Любер)",
+      "author": "Доктор Любер",
+      "level": "intermediate",
+      "goal": "strength_mass",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 8
+    },
+    {
+      "id": "program_005",
+      "file": "program_005.json",
+      "name": "Стронглифтс 5×5",
+      "author": "Стронглифтс",
+      "level": "intermediate",
+      "goal": "strength",
+      "gender": "any",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 12
+    },
+    {
+      "id": "program_006",
+      "file": "program_006.json",
+      "name": "ФулБоди+ на массу",
+      "author": "Джо Вейдер",
+      "level": "intermediate",
+      "goal": "strength_mass",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 10
+    },
+    {
+      "id": "program_007",
+      "file": "program_007.json",
+      "name": "Суперсеты на рельеф",
+      "author": "Классическая методика",
+      "level": "intermediate",
+      "goal": "fat_loss",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 8
+    },
+    {
+      "id": "program_008",
+      "file": "program_008.json",
+      "name": "Женская программа: ноги, ягодицы, верх",
+      "author": "Классическая методика",
+      "level": "intermediate",
+      "goal": "body_shaping",
+      "gender": "female",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 10
+    },
+    {
+      "id": "program_009",
+      "file": "program_009.json",
+      "name": "Бро-сплит Вейдера на массу",
+      "author": "Джо Вейдер",
+      "level": "advanced",
+      "goal": "strength_mass",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 12
+    },
+    {
+      "id": "program_010",
+      "file": "program_010.json",
+      "name": "Программа среднего→продвинутого (Вейдер)",
+      "author": "Джо Вейдер",
+      "level": "advanced",
+      "goal": "strength_mass",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 12
+    },
+    {
+      "id": "program_011",
+      "file": "program_011.json",
+      "name": "Развитие силы (Фалеев)",
+      "author": "Алексей Фалеев",
+      "level": "advanced",
+      "goal": "strength",
+      "gender": "any",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 16
+    },
+    {
+      "id": "program_012",
+      "file": "program_012.json",
+      "name": "Пауэрлифтинг — продвинутый",
+      "author": "Классическая методика пауэрлифтинга",
+      "level": "advanced",
+      "goal": "strength",
+      "gender": "male",
+      "location": "gym",
+      "days_per_week": 3,
+      "duration_weeks": 12
+    }
+  ],
+  "meta": {
+    "levels": ["beginner", "intermediate", "advanced"],
+    "goals": ["strength_mass", "strength", "fat_loss", "body_shaping"],
+    "genders": ["any", "male", "female"],
+    "locations": ["gym"]
+  }
+}

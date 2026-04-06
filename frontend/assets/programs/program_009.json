@@ -1,0 +1,58 @@
+{
+  "id": "program_009",
+  "name": "Бро-сплит Вейдера на массу",
+  "author": "Джо Вейдер",
+  "level": "advanced",
+  "goal": "strength_mass",
+  "gender": "male",
+  "location": "gym",
+  "days_per_week": 3,
+  "duration_weeks": 12,
+  "description": "Классический трёхдневный бро-сплит по принципу Вейдера. Каждая тренировка посвящена отдельным группам мышц с высоким объёмом работы. Принцип изоляции мышечных групп позволяет прорабатывать каждую мышцу максимально детально.",
+  "workouts": [
+    {
+      "day": 1,
+      "name": "Тренировка А — Грудь и трицепс",
+      "exercises": [
+        { "exercise_slug": "bench_press", "name": "Жим лёжа", "sets": 4, "reps": "6-10", "rpe": 8 },
+        { "exercise_slug": "incline_barbell_press", "name": "Жим штанги на наклонной скамье", "sets": 4, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "incline_dumbbell_press", "name": "Жим гантелей на наклонной скамье", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "pec_deck_fly", "name": "Сведения в тренажере бабочка", "sets": 3, "reps": "12-15", "rpe": 7 },
+        { "exercise_slug": "cable_crossover", "name": "Кроссовер", "sets": 3, "reps": "12-15", "rpe": 7 },
+        { "exercise_slug": "close_grip_bench_press", "name": "Жим узким хватом", "sets": 4, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "lying_triceps_extension", "name": "Французский жим лёжа", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "triceps_pushdown", "name": "Разгибание рук на блоке", "sets": 3, "reps": "12-15", "rpe": 7 }
+      ]
+    },
+    {
+      "day": 2,
+      "name": "Тренировка Б — Спина и бицепс",
+      "exercises": [
+        { "exercise_slug": "deadlift", "name": "Становая тяга", "sets": 4, "reps": "5-8", "rpe": 8 },
+        { "exercise_slug": "barbell_row", "name": "Тяга штанги в наклоне", "sets": 4, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "t_bar_row", "name": "Тяга Т-грифа", "sets": 3, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "lat_pulldown", "name": "Тяга верхнего блока к груди", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "seated_cable_row", "name": "Тяга горизонтального блока", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "barbell_shrug", "name": "Шраги со штангой", "sets": 4, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "barbell_curl", "name": "Подъем штанги на бицепс", "sets": 4, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "preacher_curl", "name": "Сгибание рук на скамье Скотта", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "hammer_curl", "name": "Молотки", "sets": 3, "reps": "10-12", "rpe": 7 }
+      ]
+    },
+    {
+      "day": 3,
+      "name": "Тренировка В — Ноги и плечи",
+      "exercises": [
+        { "exercise_slug": "barbell_squat", "name": "Приседания со штангой", "sets": 5, "reps": "6-10", "rpe": 8 },
+        { "exercise_slug": "leg_press", "name": "Жим ногами", "sets": 4, "reps": "10-12", "rpe": 8 },
+        { "exercise_slug": "romanian_deadlift", "name": "Румынская тяга", "sets": 3, "reps": "10-12", "rpe": 7 },
+        { "exercise_slug": "leg_extension", "name": "Разгибание ног в тренажере", "sets": 3, "reps": "12-15", "rpe": 7 },
+        { "exercise_slug": "lying_leg_curl", "name": "Сгибание ног лёжа", "sets": 3, "reps": "12-15", "rpe": 7 },
+        { "exercise_slug": "standing_calf_raise", "name": "Подъем на носки стоя", "sets": 4, "reps": "15-20", "rpe": 7 },
+        { "exercise_slug": "overhead_press", "name": "Жим штанги стоя", "sets": 4, "reps": "8-10", "rpe": 8 },
+        { "exercise_slug": "dumbbell_lateral_raise", "name": "Махи гантелями в стороны", "sets": 4, "reps": "12-15", "rpe": 7 },
+        { "exercise_slug": "rear_delt_fly", "name": "Разведения гантелей в наклоне", "sets": 3, "reps": "15-20", "rpe": 7 }
+      ]
+    }
+  ]
+}

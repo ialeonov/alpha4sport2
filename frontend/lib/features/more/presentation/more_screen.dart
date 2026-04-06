@@ -4,6 +4,7 @@ import '../../../core/theme/theme_notifier.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../body/presentation/body_screen.dart';
+import '../../programs/presentation/programs_screen.dart';
 import '../../templates/presentation/templates_screen.dart';
 
 class MoreScreen extends StatelessWidget {
@@ -69,6 +70,19 @@ class MoreScreen extends StatelessWidget {
               title: 'Шаблоны',
               child: const TemplatesScreen(
                   section: TemplatesSection.templates),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _MoreTile(
+            title: 'Программы',
+            subtitle:
+                'Готовые программы тренировок по уровням сложности.',
+            icon: Icons.auto_stories_rounded,
+            iconColor: const Color(0xFF7C5CBF),
+            onTap: () => _openPage(
+              context,
+              title: 'Программы',
+              child: const ProgramsScreen(),
             ),
           ),
           const SizedBox(height: 10),

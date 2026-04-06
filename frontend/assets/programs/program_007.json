@@ -1,0 +1,238 @@
+{
+  "id": "program_007",
+  "name": "Суперсеты на рельеф",
+  "author": "Классика Вейдера",
+  "level": "средний",
+  "goal": "рельеф",
+  "gender": "м",
+  "location": "зал",
+  "days_per_week": 3,
+  "duration_weeks": 8,
+  "split_type": "split",
+  "description": "Трёхдневный сплит с применением суперсетов — принцип Джо Вейдера. Короткий отдых, высокий пульс, жиросжигающий эффект при сохранении мышечной массы. Упражнения объединены в суперсеты — выполняй их без отдыха друг за другом.",
+  "notes": "Суперсет = два упражнения без отдыха между ними. Отдых после суперсета — 60–90 сек. Веса умеренные — важна непрерывность работы. Питание в дефиците калорий для максимального эффекта.",
+  "schedule": {
+    "day_a": "Понедельник — Грудь + Спина",
+    "day_b": "Среда — Ноги + Пресс",
+    "day_c": "Пятница — Плечи + Руки"
+  },
+  "workouts": [
+    {
+      "day": 1,
+      "name": "Тренировка А — Грудь + Спина (суперсеты)",
+      "superset_note": "Упражнения с одинаковым номером суперсета выполняются без отдыха подряд.",
+      "exercises": [
+        {
+          "exercise_slug": "bench_press",
+          "name": "Жим лёжа",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "10",
+          "rpe": 7,
+          "notes": "Суперсет 1А. Сразу после — тяга штанги в наклоне."
+        },
+        {
+          "exercise_slug": "barbell_row",
+          "name": "Тяга штанги в наклоне",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "10",
+          "rpe": 7,
+          "notes": "Суперсет 1Б. После — отдых 60–90 сек."
+        },
+        {
+          "exercise_slug": "incline_dumbbell_press",
+          "name": "Жим гантелей на наклонной скамье",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 7,
+          "notes": "Суперсет 2А."
+        },
+        {
+          "exercise_slug": "seated_cable_row",
+          "name": "Тяга горизонтального блока",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 7,
+          "notes": "Суперсет 2Б."
+        },
+        {
+          "exercise_slug": "pec_deck_fly",
+          "name": "Сведения в тренажере бабочка",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 3А. Изоляция груди."
+        },
+        {
+          "exercise_slug": "lat_pulldown",
+          "name": "Тяга верхнего блока к груди",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 3Б. Изоляция широчайших."
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "name": "Тренировка Б — Ноги + Пресс (суперсеты)",
+      "exercises": [
+        {
+          "exercise_slug": "barbell_squat",
+          "name": "Приседания со штангой",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "10",
+          "rpe": 7,
+          "notes": "Суперсет 1А."
+        },
+        {
+          "exercise_slug": "lying_leg_curl",
+          "name": "Сгибание ног лёжа",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "12",
+          "rpe": 7,
+          "notes": "Суперсет 1Б. Квадрицепс + бицепс бедра."
+        },
+        {
+          "exercise_slug": "leg_press",
+          "name": "Жим ногами",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 7,
+          "notes": "Суперсет 2А."
+        },
+        {
+          "exercise_slug": "romanian_deadlift",
+          "name": "Румынская тяга",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 7,
+          "notes": "Суперсет 2Б."
+        },
+        {
+          "exercise_slug": "leg_extension",
+          "name": "Разгибание ног в тренажере",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 3А. Изоляция квадрицепса."
+        },
+        {
+          "exercise_slug": "crunch",
+          "name": "Скручивания",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "20",
+          "rpe": 6,
+          "notes": "Суперсет 3Б. Пресс между изолирующими упражнениями ног."
+        },
+        {
+          "exercise_slug": "standing_calf_raise",
+          "name": "Подъем на носки стоя",
+          "superset_group": 4,
+          "sets": 3,
+          "reps": "20",
+          "rpe": 6,
+          "notes": "Суперсет 4А."
+        },
+        {
+          "exercise_slug": "hanging_leg_raise",
+          "name": "Подъем ног в висе",
+          "superset_group": 4,
+          "sets": 3,
+          "reps": "12-15",
+          "rpe": 7,
+          "notes": "Суперсет 4Б."
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "name": "Тренировка В — Плечи + Руки (суперсеты)",
+      "exercises": [
+        {
+          "exercise_slug": "overhead_press",
+          "name": "Жим штанги стоя",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "10",
+          "rpe": 7,
+          "notes": "Суперсет 1А. Базовый жим на плечи."
+        },
+        {
+          "exercise_slug": "barbell_curl",
+          "name": "Подъем штанги на бицепс",
+          "superset_group": 1,
+          "sets": 4,
+          "reps": "10",
+          "rpe": 7,
+          "notes": "Суперсет 1Б. Жим + тяга — классика Вейдера."
+        },
+        {
+          "exercise_slug": "dumbbell_lateral_raise",
+          "name": "Махи гантелями в стороны",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 2А."
+        },
+        {
+          "exercise_slug": "triceps_pushdown",
+          "name": "Разгибание рук на блоке",
+          "superset_group": 2,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 2Б."
+        },
+        {
+          "exercise_slug": "rear_delt_fly",
+          "name": "Разведения гантелей в наклоне",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 3А. Задние дельты."
+        },
+        {
+          "exercise_slug": "hammer_curl",
+          "name": "Молотки",
+          "superset_group": 3,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 6,
+          "notes": "Суперсет 3Б."
+        },
+        {
+          "exercise_slug": "face_pull",
+          "name": "Тяга каната к лицу",
+          "superset_group": 4,
+          "sets": 3,
+          "reps": "15",
+          "rpe": 6,
+          "notes": "Суперсет 4А. Здоровье плечевых суставов."
+        },
+        {
+          "exercise_slug": "lying_triceps_extension",
+          "name": "Французский жим лёжа",
+          "superset_group": 4,
+          "sets": 3,
+          "reps": "12",
+          "rpe": 6,
+          "notes": "Суперсет 4Б."
+        }
+      ]
+    }
+  ]
+}
