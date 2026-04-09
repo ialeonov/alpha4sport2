@@ -1,6 +1,7 @@
 from app.db.session import Base
 from app.models.account_event import AccountEvent
 from app.models.body import BodyEntry
+from app.models.coach import CoachChatMessage
 from app.models.progression import (
     ProgressAchievement,
     ProgressExerciseRecord,
@@ -31,6 +32,7 @@ __all__ = [
     'ExerciseCatalog',
     'ExerciseSecondaryMuscle',
     'BodyEntry',
+    'CoachChatMessage',
     'AccountEvent',
     'UserProgression',
     'ProgressAchievement',

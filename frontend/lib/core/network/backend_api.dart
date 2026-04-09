@@ -79,8 +79,7 @@ class BackendApi {
         handleUnauthorized &&
         responseDetail != 'Incorrect email or password') {
       unawaited(AuthSession.instance.expireSession());
-      throw const BackendApiException(
-          'Сессия истекла. Войдите снова.');
+      throw const BackendApiException('Сессия истекла. Войдите снова.');
     }
 
     if (responseDetail != null && responseDetail.isNotEmpty) {
@@ -109,8 +108,7 @@ class BackendApi {
         case 'Некорректная причина больничного.':
           throw BackendApiException(responseDetail);
         case 'Incorrect email or password':
-          throw const BackendApiException(
-              'Неверный email или пароль.');
+          throw const BackendApiException('Неверный email или пароль.');
         default:
           throw BackendApiException(responseDetail);
       }
@@ -479,12 +477,10 @@ class BackendApi {
     }
   }
 
-  static Future<Map<String, dynamic>> importSharedTemplate(
-      String token) async {
+  static Future<Map<String, dynamic>> importSharedTemplate(String token) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response =
-          await dio.post('/api/v1/templates/import/$token');
+      final response = await dio.post('/api/v1/templates/import/$token');
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (error) {
       _throwFriendlyError(error,
@@ -512,8 +508,8 @@ class BackendApi {
     if (templateExercises != null) {
       return List.generate(templateExercises.length, (i) {
         final exercise = templateExercises[i];
-        final name = (exercise['exercise_name'] ?? exercise['name'] ?? '')
-            .toString();
+        final name =
+            (exercise['exercise_name'] ?? exercise['name'] ?? '').toString();
         return {
           'catalog_exercise_id':
               exercise['catalog_exercise_id'] ?? exercise['id'],
@@ -740,6 +736,40 @@ class BackendApi {
     }
   }
 
+  static Future<Map<String, dynamic>> chatWithCoach({
+    required List<Map<String, String>> messages,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.post(
+        '/api/v1/coach/chat',
+        data: {'messages': messages},
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage:
+            'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð¾Ñ‚Ð²ÐµÑ‚ AI-ÐºÐ¾ÑƒÑ‡Ð°. ',
+      );
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getCoachHistory() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/coach/history');
+      final data =
+          (response.data['messages'] as List).cast<Map<String, dynamic>>();
+      return data;
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось загрузить историю AI-коуча.',
+      );
+    }
+  }
+
   static Future<Map<String, dynamic>> getProgressionProfile() async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -834,8 +864,7 @@ class BackendApi {
   static Future<Map<String, dynamic>> getUserPublicProfile(int userId) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response =
-          await dio.get('/api/v1/progression/profile/$userId');
+      final response = await dio.get('/api/v1/progression/profile/$userId');
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (error) {
       _throwFriendlyError(error,

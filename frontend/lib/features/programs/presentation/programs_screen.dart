@@ -317,7 +317,7 @@ class _LevelSection extends StatefulWidget {
 }
 
 class _LevelSectionState extends State<_LevelSection> {
-  bool _expanded = true;
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {

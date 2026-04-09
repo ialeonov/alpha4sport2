@@ -4,6 +4,7 @@ import '../../../core/theme/theme_notifier.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../body/presentation/body_screen.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../programs/presentation/programs_screen.dart';
 import '../../templates/presentation/templates_screen.dart';
 
@@ -40,12 +41,23 @@ class MoreScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
         children: [
-          DashboardSummaryCard(
+          const DashboardSummaryCard(
             subtitle: 'Инструменты и разделы',
             title: 'Инструменты',
           ),
           const SizedBox(height: 16),
           const DashboardSectionLabel('Инструменты'),
+          const SizedBox(height: 10),
+          _MoreTile(
+            title: 'AI-коуч',
+            subtitle:
+                'Чат с тренером, который видит твою статистику и помогает разбирать прогресс.',
+            icon: Icons.smart_toy_rounded,
+            iconColor: const Color(0xFF1A8F6D),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AiCoachScreen()),
+            ),
+          ),
           const SizedBox(height: 10),
           _MoreTile(
             title: 'Упражнения',
@@ -55,8 +67,7 @@ class MoreScreen extends StatelessWidget {
             onTap: () => _openPage(
               context,
               title: 'Упражнения',
-              child: const TemplatesScreen(
-                  section: TemplatesSection.exercises),
+              child: const TemplatesScreen(section: TemplatesSection.exercises),
             ),
           ),
           const SizedBox(height: 10),
@@ -68,15 +79,13 @@ class MoreScreen extends StatelessWidget {
             onTap: () => _openPage(
               context,
               title: 'Шаблоны',
-              child: const TemplatesScreen(
-                  section: TemplatesSection.templates),
+              child: const TemplatesScreen(section: TemplatesSection.templates),
             ),
           ),
           const SizedBox(height: 10),
           _MoreTile(
             title: 'Программы',
-            subtitle:
-                'Готовые программы тренировок по уровням сложности.',
+            subtitle: 'Готовые программы тренировок по уровням сложности.',
             icon: Icons.auto_stories_rounded,
             iconColor: const Color(0xFF7C5CBF),
             onTap: () => _openPage(
@@ -176,12 +185,13 @@ class _ThemeToggleTileState extends State<_ThemeToggleTile> {
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(isDark ? 'Переключить на светлую' : 'Переключить на тёмную'),
+          child:
+              Text(isDark ? 'Переключить на светлую' : 'Переключить на тёмную'),
         ),
         trailing: Switch(
           value: !isDark,
           onChanged: (_) => ThemeNotifier.instance.toggleTheme(),
-          activeColor: accentColor,
+          activeThumbColor: accentColor,
         ),
         onTap: () => ThemeNotifier.instance.toggleTheme(),
       ),

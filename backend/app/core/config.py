@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     allowed_origin_regex: str = r'https?://(localhost|127\.0\.0\.1)(:\d+)?'
     allow_credentials: bool = False
     upload_dir: str = './uploads'
+    ai_coach_base_url: str = 'https://api.timeweb.cloud/api-models/v1'
+    ai_coach_api_key: str = ''
+    ai_coach_model: str = ''
+    ai_coach_system_prompt: str = ''
+    ai_coach_timeout_seconds: float = 45.0
+    ai_coach_temperature: float = 0.6
+    ai_coach_referer: str = ''
+    ai_coach_title: str = 'Alpha4Sport AI Coach'
 
     @property
     def allowed_origins_list(self) -> list[str]:
