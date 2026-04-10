@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.models.body import BodyEntry
 from app.models.coach import CoachChatMessage
 from app.models.user import User
-from app.models.workout import ExerciseSet, Workout, WorkoutExercise
+from app.models.workout import ExerciseCatalog, ExerciseSet, Workout, WorkoutExercise
 from app.services.account_event_service import display_name_for_user
 
 
@@ -102,6 +102,19 @@ class CoachService:
         self._trim_history(user_id=user_id)
         self.db.commit()
 
+    def delete_message(self, *, user_id: int, message_id: int) -> bool:
+        message = self.db.scalar(
+            select(CoachChatMessage).where(
+                CoachChatMessage.id == message_id,
+                CoachChatMessage.user_id == user_id,
+            )
+        )
+        if message is None:
+            return False
+        self.db.delete(message)
+        self.db.commit()
+        return True
+
     def _build_llm_messages(self, context_summary: dict, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         today = datetime.now(_APP_TIMEZONE).date()
         system_prompt = settings.ai_coach_system_prompt.strip() or (
@@ -110,7 +123,21 @@ class CoachService:
             'Опирайся только на предоставленную статистику пользователя. '
             'Если данных недостаточно, прямо скажи об этом. '
             'Не выдумывай медицинские диагнозы и не заменяй врача. '
-            'Давай практические рекомендации по тренировкам, восстановлению и нагрузке.'
+            'Давай практические рекомендации по тренировкам, восстановлению и нагрузке. '
+            'Для рекомендаций по упражнениям используй прежде всего упражнения из персонального каталога пользователя '
+            'и из его недавних тренировок. Не предлагай упражнения, которых нет в его доступном списке, '
+            'если только пользователь прямо не просит альтернативу. '
+            'При анализе опирайся на: частоту тренировок, распределение мышечных групп (поле primaryMuscle), '
+            'muscleDistribution (когда последний раз тренировалась каждая мышца), состав упражнений, '
+            'число рабочих подходов, длительность тренировок (durationMinutes) и восстановление. '
+            'Тоннаж — вторичный и шумный показатель, особенно для жима ногами и подобных движений. '
+            'Не делай по тоннажу главный вывод о качестве тренировки. '
+            'RPE (Rate of Perceived Exertion) в подходах — сигнал интенсивности: '
+            'RPE 7 — умеренно, RPE 8-9 — тяжело, RPE 10 — до отказа. '
+            'Учитывай RPE при оценке усталости и восстановления. '
+            'Формат ответа: отвечай кратко если вопрос простой. '
+            'Используй списки только когда перечисляешь конкретные рекомендации или упражнения. '
+            'Не переспрашивай и не уточняй — давай лучший ответ на основе имеющихся данных.'
         )
         runtime_prompt = (
             f'Текущее приложение: "{_APP_DISPLAY_NAME}". '
@@ -150,9 +177,19 @@ class CoachService:
                 .where(Workout.user_id == user.id)
                 .options(joinedload(Workout.exercises).joinedload(WorkoutExercise.sets))
                 .order_by(Workout.started_at.desc(), Workout.id.desc())
-                .limit(5)
+                .limit(12)
             ).unique()
         )
+        catalog_exercises = list(
+            self.db.scalars(
+                select(ExerciseCatalog)
+                .where(ExerciseCatalog.user_id == user.id)
+                .order_by(ExerciseCatalog.name.asc())
+            )
+        )
+        # Lookup: catalog_exercise_id → primary_muscle (and by name for fallback)
+        muscle_map: dict[int, str] = {ex.id: ex.primary_muscle for ex in catalog_exercises}
+        muscle_map_by_name: dict[str, str] = {ex.name: ex.primary_muscle for ex in catalog_exercises}
 
         workout_count_total = self.db.scalar(
             select(func.count()).select_from(Workout).where(Workout.user_id == user.id)
@@ -187,28 +224,92 @@ class CoachService:
         top_exercises = Counter()
         workouts_summary = []
         for workout in recent_workouts:
-            exercise_names = []
             total_sets = 0
             total_volume = 0.0
+            exercises_summary = []
             for exercise in workout.exercises:
-                exercise_names.append(exercise.exercise_name)
                 top_exercises[exercise.exercise_name] += 1
+                exercise_volume = 0.0
+                sets_compact = []
                 for set_item in exercise.sets:
                     if set_item.reps > 0:
                         total_sets += 1
                     if set_item.weight is not None:
-                        total_volume += float(set_item.weight or 0) * set_item.reps
+                        set_vol = float(set_item.weight) * set_item.reps
+                        total_volume += set_vol
+                        exercise_volume += set_vol
+                    parts = []
+                    if set_item.weight is not None:
+                        parts.append(f'{set_item.weight:g}kg')
+                    parts.append(f'{set_item.reps}r')
+                    if set_item.rpe is not None:
+                        parts.append(f'@{set_item.rpe:g}')
+                    note = _trim_text(set_item.notes, 60)
+                    if note:
+                        parts.append(f'[{note}]')
+                    sets_compact.append('×'.join(parts))
 
-            workouts_summary.append(
-                {
-                    'date': workout.started_at.date().isoformat() if workout.started_at else None,
-                    'name': workout.name,
-                    'exerciseNames': exercise_names[:8],
-                    'exerciseCount': len(exercise_names),
-                    'totalSets': total_sets,
-                    'estimatedVolume': round(total_volume, 1),
+                primary_muscle = (
+                    muscle_map.get(exercise.catalog_exercise_id)
+                    or muscle_map_by_name.get(exercise.exercise_name)
+                )
+                ex_entry: dict = {
+                    'name': exercise.exercise_name,
+                    'sets': ' / '.join(sets_compact),
                 }
-            )
+                if primary_muscle:
+                    ex_entry['muscle'] = primary_muscle
+                if exercise_volume:
+                    ex_entry['vol'] = round(exercise_volume, 1)
+                note = _trim_text(exercise.notes, 200)
+                if note:
+                    ex_entry['notes'] = note
+                exercises_summary.append(ex_entry)
+
+            duration_minutes = None
+            if workout.started_at and workout.finished_at:
+                duration_minutes = round(
+                    (workout.finished_at - workout.started_at).total_seconds() / 60
+                )
+            w_entry: dict = {
+                'date': workout.started_at.date().isoformat() if workout.started_at else None,
+                'name': workout.name,
+                'exercises': exercises_summary,
+            }
+            if duration_minutes is not None:
+                w_entry['durationMin'] = duration_minutes
+            if total_sets:
+                w_entry['totalSets'] = total_sets
+            if total_volume:
+                w_entry['totalVol'] = round(total_volume, 1)
+            note = _trim_text(workout.notes, 240)
+            if note:
+                w_entry['notes'] = note
+            workouts_summary.append(w_entry)
+
+        # Muscle group distribution from recent workouts
+        muscle_last_date: dict[str, str] = {}
+        muscle_recent_sets: Counter = Counter()
+        for workout in recent_workouts:
+            workout_date = workout.started_at.date().isoformat() if workout.started_at else None
+            for exercise in workout.exercises:
+                muscle = (
+                    muscle_map.get(exercise.catalog_exercise_id)
+                    or muscle_map_by_name.get(exercise.exercise_name)
+                )
+                if muscle and workout_date:
+                    if muscle not in muscle_last_date or workout_date > muscle_last_date[muscle]:
+                        muscle_last_date[muscle] = workout_date
+                    muscle_recent_sets[muscle] += sum(1 for s in exercise.sets if s.reps > 0)
+
+        muscle_distribution = [
+            {
+                'muscle': muscle,
+                'lastTrainedDate': muscle_last_date[muscle],
+                'recentSets': muscle_recent_sets[muscle],
+            }
+            for muscle in sorted(muscle_last_date, key=lambda m: muscle_last_date[m], reverse=True)
+        ]
 
         latest_body = body_entries[0] if body_entries else None
         oldest_recent_weight = next((entry for entry in reversed(body_entries) if entry.weight_kg is not None), None)
@@ -226,12 +327,19 @@ class CoachService:
             },
             'user': {
                 'displayName': display_name_for_user(user),
-                'email': user.email,
             },
             'trainingSummary': {
                 'totalWorkouts': workout_count_total,
                 'workoutsLast30Days': recent_workout_count,
-                'topExercisesRecent': [name for name, _ in top_exercises.most_common(5)],
+                'topExercisesRecent': [
+                    {'name': name, 'muscle': muscle_map_by_name.get(name)}
+                    for name, _ in top_exercises.most_common(5)
+                ],
+                'availableExercises': [
+                    {'name': ex.name, 'primaryMuscle': ex.primary_muscle}
+                    for ex in catalog_exercises
+                ],
+                'muscleDistribution': muscle_distribution,
             },
             'bodyMetrics': None
             if latest_body is None
@@ -253,6 +361,12 @@ class CoachService:
             ],
             'recentWorkouts': workouts_summary,
         }
+
+    def clear_history(self, *, user_id: int) -> None:
+        self.db.execute(
+            delete(CoachChatMessage).where(CoachChatMessage.user_id == user_id)
+        )
+        self.db.commit()
 
     def _trim_history(self, *, user_id: int) -> None:
         ids_to_keep = list(

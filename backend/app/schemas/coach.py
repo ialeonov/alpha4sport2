@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class CoachChatMessage(BaseModel):
     role: Literal['user', 'assistant']
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(min_length=1, max_length=12000)
 
 
 class CoachChatRequest(BaseModel):

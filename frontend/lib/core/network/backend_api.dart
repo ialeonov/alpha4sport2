@@ -56,7 +56,7 @@ class BackendApi {
       BaseOptions(
         baseUrl: _normalizeBaseUrl(baseUrl),
         connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 60),
         headers: {
           if (token != null && token.isNotEmpty)
             'Authorization': 'Bearer $token',
@@ -749,8 +749,7 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(
         error,
-        defaultMessage:
-            'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð¾Ñ‚Ð²ÐµÑ‚ AI-ÐºÐ¾ÑƒÑ‡Ð°. ',
+        defaultMessage: 'Не удалось получить ответ AI - коуча.',
       );
     }
   }
@@ -765,7 +764,31 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(
         error,
-        defaultMessage: 'Не удалось загрузить историю AI-коуча.',
+        defaultMessage: 'Не удалось загрузить историю AI - коуча.',
+      );
+    }
+  }
+
+  static Future<void> deleteCoachMessage(int messageId) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      await dio.delete('/api/v1/coach/history/$messageId');
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось удалить сообщение AI - коуча.',
+      );
+    }
+  }
+
+  static Future<void> clearCoachHistory() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      await dio.delete('/api/v1/coach/history');
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось очистить историю AI - коуча.',
       );
     }
   }

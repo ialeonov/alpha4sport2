@@ -30,6 +30,29 @@ async def coach_history(
     }
 
 
+@router.delete('/history', status_code=status.HTTP_204_NO_CONTENT)
+async def clear_coach_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    service.clear_history(user_id=current_user.id)
+    return None
+
+
+@router.delete('/history/{message_id}', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_coach_history_message(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    deleted = service.delete_message(user_id=current_user.id, message_id=message_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Сообщение не найдено.')
+    return None
+
+
 @router.post('/chat', response_model=CoachChatResponse)
 async def coach_chat(
     payload: CoachChatRequest,

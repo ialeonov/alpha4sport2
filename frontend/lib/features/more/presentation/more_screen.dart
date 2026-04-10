@@ -49,7 +49,7 @@ class MoreScreen extends StatelessWidget {
           const DashboardSectionLabel('Инструменты'),
           const SizedBox(height: 10),
           _MoreTile(
-            title: 'AI-коуч',
+            title: 'AI - коуч',
             subtitle:
                 'Чат с тренером, который видит твою статистику и помогает разбирать прогресс.',
             icon: Icons.smart_toy_rounded,

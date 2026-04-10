@@ -122,12 +122,15 @@ class MuscleHeatmapCard extends StatelessWidget {
     final idToColor = <String, String>{
       for (final id in assetData.allMappableSvgIds) id: assetData.defaultFill,
     };
+    final idToMaxLoad = <String, double>{};
 
     normalizedLoads.forEach((muscle, normalizedLoad) {
       final svgIds = assetData.muscleToSvgIds[muscle] ?? const [];
-      final color = resolver.resolveHex(normalizedLoad);
       for (final svgId in svgIds) {
-        idToColor[svgId] = color;
+        if (normalizedLoad > (idToMaxLoad[svgId] ?? 0)) {
+          idToMaxLoad[svgId] = normalizedLoad;
+          idToColor[svgId] = resolver.resolveHex(normalizedLoad);
+        }
       }
     });
 
@@ -265,12 +268,15 @@ class WorkoutHeatmapPreview extends StatelessWidget {
     final idToColor = <String, String>{
       for (final id in assetData.allMappableSvgIds) id: assetData.defaultFill,
     };
+    final idToMaxLoad = <String, double>{};
 
     normalizedLoads.forEach((muscle, normalizedLoad) {
       final svgIds = assetData.muscleToSvgIds[muscle] ?? const [];
-      final color = resolver.resolveHex(normalizedLoad);
       for (final svgId in svgIds) {
-        idToColor[svgId] = color;
+        if (normalizedLoad > (idToMaxLoad[svgId] ?? 0)) {
+          idToMaxLoad[svgId] = normalizedLoad;
+          idToColor[svgId] = resolver.resolveHex(normalizedLoad);
+        }
       }
     });
 
