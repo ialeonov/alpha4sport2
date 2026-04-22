@@ -1,3 +1,5 @@
+import 'dart:math' show log;
+
 import 'muscle_heatmap_models.dart';
 import 'muscle_load_normalizer.dart';
 
@@ -82,22 +84,12 @@ class MuscleLoadCalculator {
                 const [];
         final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
 
-        // Find max weight in this exercise to compute weight-proportional scores.
-        // If all sets have no weight (bodyweight exercise), maxWeight stays 0
-        // and each set contributes its full base score.
-        double maxWeight = 0;
-        for (final rawSet in sets) {
-          if (rawSet is! Map) continue;
-          final w = _toDouble(rawSet.cast<String, dynamic>()['weight']);
-          if (w > maxWeight) maxWeight = w;
-        }
-
         for (final rawSet in sets) {
           if (rawSet is! Map) {
             continue;
           }
           final set = rawSet.cast<String, dynamic>();
-          final setScore = _calculateSetScore(set, maxWeight: maxWeight);
+          final setScore = _calculateSetScore(set);
           if (setScore <= 0) {
             continue;
           }
@@ -228,19 +220,16 @@ class MuscleLoadCalculator {
     );
   }
 
-  double _calculateSetScore(
-    Map<String, dynamic> set, {
-    double maxWeight = 0,
-  }) {
+  double _calculateSetScore(Map<String, dynamic> set) {
     final reps = _toDouble(set['reps']);
     if (reps <= 0) {
       return 0;
     }
-    // Weight factor: scale each set's contribution relative to the heaviest
-    // set in the exercise. Warmup/dropsets contribute proportionally less.
-    // Falls back to 1.0 for bodyweight exercises (maxWeight == 0).
-    final weightFactor = maxWeight > 0
-        ? (_toDouble(set['weight']) / maxWeight).clamp(0.0, 1.0)
+    final weight = _toDouble(set['weight']);
+    // Absolute log scale so score never decreases when a new heavy set is added.
+    // 100 kg → 1.0, 50 kg → 0.85, 20 kg → 0.65, 10 kg → 0.52, bodyweight → 1.0.
+    final weightFactor = weight > 0
+        ? (log(weight + 1) / log(101)).clamp(0.2, 1.0)
         : 1.0;
     return baseSetScore * _repFactor(reps) * weightFactor;
   }

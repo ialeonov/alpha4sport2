@@ -9,7 +9,6 @@ import 'package:flutter/rendering.dart';
 import '../../../core/network/backend_api.dart';
 import '../../../core/storage/local_cache.dart';
 import '../../heatmap/data/muscle_heatmap_asset_loader.dart';
-import '../../heatmap/domain/muscle_heatmap_color_resolver.dart';
 import '../../heatmap/domain/muscle_heatmap_models.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/body_svg_colorizer.dart';
@@ -64,9 +63,15 @@ class WorkoutShareService {
       final futures = await Future.wait([
         BackendApi.getCurrentUser(),
         _loadTotalWorkoutCount(),
+        BackendApi.getProgressionProfile().catchError((_) => <String, dynamic>{}),
       ]);
       final user = futures[0] as Map<String, dynamic>;
       final count = futures[1] as int?;
+      final progressionRaw = futures[2] as Map<String, dynamic>;
+
+      final progressionProfile =
+          (progressionRaw['profile'] as Map?)?.cast<String, dynamic>();
+      final title = progressionProfile?['title'] as String?;
 
       final rawAvatarUrl =
           (user['avatar_url'] ?? '').toString().trim();
@@ -85,6 +90,7 @@ class WorkoutShareService {
                 : (user['display_name'] as String).trim(),
         resolvedAvatarUrl: resolvedUrl,
         totalWorkouts: count,
+        title: title,
       );
     } catch (_) {
       return null;
@@ -107,24 +113,11 @@ class WorkoutShareService {
   static String _buildColoredSvg(
     MuscleHeatmapAssetData assetData,
     Map<String, double> normalizedLoads,
-  ) {
-    const resolver = MuscleHeatmapColorResolver();
-    final idToColor = <String, String>{
-      for (final id in assetData.allMappableSvgIds) id: assetData.defaultFill,
-    };
-    normalizedLoads.forEach((muscle, load) {
-      final svgIds = assetData.muscleToSvgIds[muscle] ?? const [];
-      final color = resolver.resolveHex(load);
-      for (final id in svgIds) {
-        idToColor[id] = color;
-      }
-    });
-    return const BodySvgColorizer().colorize(
-      svgSource: assetData.svgSource,
-      svgIdToColor: idToColor,
-      fallbackFill: assetData.defaultFill,
-    );
-  }
+  ) =>
+      const BodySvgColorizer().colorizeFromLoads(
+        assetData: assetData,
+        normalizedLoads: normalizedLoads,
+      );
 
   // ── PNG capture ──────────────────────────────────────────────────────
 

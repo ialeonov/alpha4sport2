@@ -18,10 +18,10 @@ class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
 
   @override
-  State<CalendarScreen> createState() => _CalendarScreenState();
+  State<CalendarScreen> createState() => CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class CalendarScreenState extends State<CalendarScreen> {
   static const _calendarCellHeight = 62.0;
   static const _weekdayLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   static const _monthLabels = [
@@ -88,6 +88,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Future<List<Map<String, dynamic>>> _loadTemplates() =>
       _workoutExportService.loadTemplates();
+
+  Future<void> refresh() => _refresh();
 
   Future<void> _refresh() async {
     setState(() {
@@ -386,6 +388,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   'position': 1,
                   'reps': '',
                   'weight': null,
+                  'set_type': 'work',
                   'rpe': null,
                   'notes': null,
                 },
@@ -396,6 +399,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   'position': setIndex + 1,
                   'reps': set['reps'] ?? '',
                   'weight': set['weight'],
+                  'set_type': (set['set_type'] ?? 'work').toString(),
                   'rpe': null,
                   'notes': null,
                 };
@@ -522,7 +526,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
       (
         'Последние 3 месяца',
         DateTimeRange(
-            start: DateTime(today.year, today.month - 2, today.day), end: today),
+            start: DateTime(today.year, today.month - 2, today.day),
+            end: today),
       ),
       (
         'Этот год',
@@ -536,8 +541,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     ];
 
     // Sentinel: start.year == 0 → open manual date picker
-    final manualSentinel =
-        DateTimeRange(start: DateTime(0), end: DateTime(0));
+    final manualSentinel = DateTimeRange(start: DateTime(0), end: DateTime(0));
 
     return showModalBottomSheet<DateTimeRange>(
       context: context,
@@ -634,16 +638,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text('В выбранном диапазоне нет тренировок для экспорта.'),
+          content: Text('В выбранном диапазоне нет тренировок для экспорта.'),
         ),
       );
       return;
     }
 
     try {
-      final exerciseCatalog =
-          await _workoutExportService.loadExerciseCatalog();
+      final exerciseCatalog = await _workoutExportService.loadExerciseCatalog();
       final exportData = _workoutExportService.buildExport(
         workouts: selectedWorkouts,
         rangeFrom: pickedRange.start,
@@ -698,8 +700,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        insetPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
           child: Column(
@@ -719,8 +720,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     ? 'Тренировок нет'
                     : 'Тренировок: ${weekWorkouts.length}',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color:
-                          Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
               ),
               const SizedBox(height: 12),
@@ -1084,13 +1084,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
                     children: [
+                      const ScreenTitle('Календарь'),
+                      const SizedBox(height: 14),
                       Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 1100),
                           child: DashboardCard(
                             color: Color.alphaBlend(
-                              scheme.surface.withValues(alpha: 0.36),
-                              scheme.surfaceContainerHigh,
+                              scheme.secondary.withValues(alpha: 0.07),
+                              scheme.surfaceContainerLow,
                             ),
                             borderColor:
                                 scheme.outlineVariant.withValues(alpha: 0.28),
@@ -1467,15 +1469,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                       : () => _exportSelectedDayWorkouts(
                                             selectedDayWorkouts,
                                           ),
-                                  icon: const Icon(Icons.file_download_outlined, size: 18),
+                                  icon: const Icon(Icons.file_download_outlined,
+                                      size: 18),
                                   label: const Text('Тренировку'),
                                 ),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: OutlinedButton.icon(
-                                  onPressed: () => _exportWorkoutRange(workouts),
-                                  icon: const Icon(Icons.download_for_offline_outlined, size: 18),
+                                  onPressed: () =>
+                                      _exportWorkoutRange(workouts),
+                                  icon: const Icon(
+                                      Icons.download_for_offline_outlined,
+                                      size: 18),
                                   label: const Text('Диапазон'),
                                 ),
                               ),

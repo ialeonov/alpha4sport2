@@ -117,29 +117,11 @@ class MuscleHeatmapCard extends StatelessWidget {
     );
   }
 
-  String _buildSvg(MuscleHeatmapAssetData assetData) {
-    final resolver = const MuscleHeatmapColorResolver();
-    final idToColor = <String, String>{
-      for (final id in assetData.allMappableSvgIds) id: assetData.defaultFill,
-    };
-    final idToMaxLoad = <String, double>{};
-
-    normalizedLoads.forEach((muscle, normalizedLoad) {
-      final svgIds = assetData.muscleToSvgIds[muscle] ?? const [];
-      for (final svgId in svgIds) {
-        if (normalizedLoad > (idToMaxLoad[svgId] ?? 0)) {
-          idToMaxLoad[svgId] = normalizedLoad;
-          idToColor[svgId] = resolver.resolveHex(normalizedLoad);
-        }
-      }
-    });
-
-    return const BodySvgColorizer().colorize(
-      svgSource: assetData.svgSource,
-      svgIdToColor: idToColor,
-      fallbackFill: assetData.defaultFill,
-    );
-  }
+  String _buildSvg(MuscleHeatmapAssetData assetData) =>
+      const BodySvgColorizer().colorizeFromLoads(
+        assetData: assetData,
+        normalizedLoads: normalizedLoads,
+      );
 }
 
 class WorkoutHeatmapPreview extends StatelessWidget {
@@ -263,29 +245,11 @@ class WorkoutHeatmapPreview extends StatelessWidget {
     );
   }
 
-  String _buildSvg(MuscleHeatmapAssetData assetData) {
-    final resolver = const MuscleHeatmapColorResolver();
-    final idToColor = <String, String>{
-      for (final id in assetData.allMappableSvgIds) id: assetData.defaultFill,
-    };
-    final idToMaxLoad = <String, double>{};
-
-    normalizedLoads.forEach((muscle, normalizedLoad) {
-      final svgIds = assetData.muscleToSvgIds[muscle] ?? const [];
-      for (final svgId in svgIds) {
-        if (normalizedLoad > (idToMaxLoad[svgId] ?? 0)) {
-          idToMaxLoad[svgId] = normalizedLoad;
-          idToColor[svgId] = resolver.resolveHex(normalizedLoad);
-        }
-      }
-    });
-
-    return const BodySvgColorizer().colorize(
-      svgSource: assetData.svgSource,
-      svgIdToColor: idToColor,
-      fallbackFill: assetData.defaultFill,
-    );
-  }
+  String _buildSvg(MuscleHeatmapAssetData assetData) =>
+      const BodySvgColorizer().colorizeFromLoads(
+        assetData: assetData,
+        normalizedLoads: normalizedLoads,
+      );
 }
 
 class _LegendChip extends StatelessWidget {

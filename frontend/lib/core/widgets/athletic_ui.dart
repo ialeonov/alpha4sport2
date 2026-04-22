@@ -1,4 +1,46 @@
 import 'package:flutter/material.dart';
+class ScreenTitle extends StatelessWidget {
+  const ScreenTitle(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFE8C7AA)
+        : Theme.of(context).colorScheme.onSurface;
+    const style = TextStyle(
+      fontFamily: 'Bebas Neue Cyrillic',
+      fontSize: 44,
+      letterSpacing: 2,
+      height: 1,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tp = TextPainter(
+            text: TextSpan(text: text.toUpperCase(), style: style),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: double.infinity);
+          final scaleX = constraints.maxWidth / tp.width;
+          return SizedBox(
+            width: constraints.maxWidth,
+            height: tp.height,
+            child: Transform.scale(
+              scaleX: scaleX,
+              scaleY: 1.0,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                text.toUpperCase(),
+                style: style.copyWith(color: color),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
 
 class DashboardSectionLabel extends StatelessWidget {
   const DashboardSectionLabel(this.text, {super.key});
@@ -73,7 +115,11 @@ class DashboardCard extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(borderRadius),
-        color: color ?? scheme.surfaceContainerLow.withValues(alpha: 0.96),
+        color: color ??
+            Color.alphaBlend(
+              scheme.secondary.withValues(alpha: 0.07),
+              scheme.surfaceContainerLow,
+            ),
         border: Border.all(
           color: borderColor ?? scheme.outlineVariant.withValues(alpha: 0.22),
         ),

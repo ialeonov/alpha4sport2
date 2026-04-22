@@ -198,9 +198,9 @@ class ProgressAnalysisService {
     List<ExerciseSessionPerformance> sessions,
     List<Map<String, dynamic>> templates,
   ) {
-    final repRange =
-        _resolveRepRanges(templates)[_normalizeExerciseLookupName(exerciseName)] ??
-            defaultRepRange;
+    final repRange = _resolveRepRanges(
+            templates)[_normalizeExerciseLookupName(exerciseName)] ??
+        defaultRepRange;
     final recent =
         sessions.length <= 5 ? sessions : sessions.sublist(sessions.length - 5);
     final latest = recent.last;

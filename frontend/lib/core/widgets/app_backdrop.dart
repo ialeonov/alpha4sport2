@@ -22,54 +22,56 @@ class AppBackdrop extends StatelessWidget {
         systemNavigationBarIconBrightness:
             isDark ? Brightness.light : Brightness.dark,
       ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color.alphaBlend(
-                scheme.surfaceBright.withValues(alpha: 0.06),
-                scheme.surface,
+      child: isDark
+          ? child
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color.alphaBlend(
+                      scheme.surfaceBright.withValues(alpha: 0.06),
+                      scheme.surface,
+                    ),
+                    scheme.surface,
+                    Color.alphaBlend(
+                      scheme.surfaceContainerLowest.withValues(alpha: 0.45),
+                      scheme.surface,
+                    ),
+                  ],
+                ),
               ),
-              scheme.surface,
-              Color.alphaBlend(
-                scheme.surfaceContainerLowest.withValues(alpha: 0.45),
-                scheme.surface,
-              ),
-            ],
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -90,
-              right: -40,
-              child: _GlowOrb(
-                size: 260,
-                color: scheme.secondary.withValues(alpha: 0.1),
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: -90,
+                    right: -40,
+                    child: _GlowOrb(
+                      size: 260,
+                      color: scheme.secondary.withValues(alpha: 0.1),
+                    ),
+                  ),
+                  Positioned(
+                    top: 70,
+                    left: -90,
+                    child: _GlowOrb(
+                      size: 240,
+                      color: scheme.primary.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: -150,
+                    left: 10,
+                    child: _GlowOrb(
+                      size: 300,
+                      color: scheme.tertiary.withValues(alpha: 0.04),
+                    ),
+                  ),
+                  child,
+                ],
               ),
             ),
-            Positioned(
-              top: 70,
-              left: -90,
-              child: _GlowOrb(
-                size: 240,
-                color: scheme.primary.withValues(alpha: 0.08),
-              ),
-            ),
-            Positioned(
-              bottom: -150,
-              left: 10,
-              child: _GlowOrb(
-                size: 300,
-                color: scheme.tertiary.withValues(alpha: 0.04),
-              ),
-            ),
-            child,
-          ],
-        ),
-      ),
     );
   }
 }

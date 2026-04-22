@@ -5,7 +5,7 @@ class AppTheme {
   static const Color _seed = Color(0xFF4F8D95);
 
   // Dark chrome
-  static const Color _chromeDark = Color(0xFF0B1016);
+  static const Color _chromeDark = Color(0xFF060810);
   static const Color _chromeOnDark = Color(0xFFF4EFE8);
 
   // Light chrome
@@ -32,17 +32,18 @@ class AppTheme {
       onTertiary: const Color(0xFF1E280E),
       tertiaryContainer: const Color(0xFF3E4A2B),
       onTertiaryContainer: const Color(0xFFF2F7D8),
-      surface: const Color(0xFF121821),
+      surface: const Color(0xFF0C1018),
       onSurface: const Color(0xFFF5F1EC),
       onSurfaceVariant: const Color(0xFFA4B0BE),
-      surfaceContainerLowest: const Color(0xFF0F141C),
-      surfaceContainerLow: const Color(0xFF161D27),
-      surfaceContainer: const Color(0xFF1B2430),
-      surfaceContainerHigh: const Color(0xFF222D3A),
-      surfaceContainerHighest: const Color(0xFF2A3745),
-      surfaceBright: const Color(0xFF374555),
+      surfaceTint: Colors.transparent,
+      surfaceContainerLowest: const Color(0xFF08090E),
+      surfaceContainerLow: const Color(0xFF0F1319),
+      surfaceContainer: const Color(0xFF141820),
+      surfaceContainerHigh: const Color(0xFF191F28),
+      surfaceContainerHighest: const Color(0xFF202835),
+      surfaceBright: const Color(0xFF2C3846),
       outline: const Color(0xFF76695E),
-      outlineVariant: const Color(0xFF354252),
+      outlineVariant: const Color(0xFF2E3A47),
     );
 
     return _buildTheme(
@@ -150,17 +151,18 @@ class AppTheme {
         margin: EdgeInsets.zero,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 72,
+        height: 60,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
         backgroundColor: chrome.withValues(alpha: 0.97),
         surfaceTintColor: Colors.transparent,
-        indicatorColor: colorScheme.secondary.withValues(alpha: 0.18),
+        indicatorColor: Colors.transparent,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final isSelected = states.contains(WidgetState.selected);
           return IconThemeData(
-            size: isSelected ? 24 : 22,
+            size: isSelected ? 26 : 22,
             color: isSelected
                 ? colorScheme.secondary
-                : chromeOn.withValues(alpha: 0.55),
+                : chromeOn.withValues(alpha: 0.45),
           );
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {

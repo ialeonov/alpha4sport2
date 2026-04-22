@@ -4,6 +4,7 @@ class LocalCache {
   static const _boxName = 'alpha4sport_cache';
   static const _sessionKeys = <String>{
     CacheKeys.token,
+    CacheKeys.currentUserEmail,
     CacheKeys.workoutsCache,
     CacheKeys.templatesCache,
     CacheKeys.exerciseCatalogCache,
@@ -47,6 +48,7 @@ class LocalCache {
 class CacheKeys {
   static const token = 'auth_token';
   static const baseUrl = 'base_url';
+  static const currentUserEmail = 'current_user_email';
   static const workoutsCache = 'workouts_cache';
   static const templatesCache = 'templates_cache';
   static const exerciseCatalogCache = 'exercise_catalog_cache';

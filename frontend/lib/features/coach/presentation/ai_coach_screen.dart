@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -21,6 +23,16 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   bool _isSending = false;
   bool _showJumpUp = false;
   bool _showJumpDown = false;
+  int _sendingMessageIndex = 0;
+  Timer? _sendingMessageTimer;
+
+  static const _sendingMessages = [
+    'Анализирую тренировки...',
+    'Смотрю историю нагрузок...',
+    'Готовлю рекомендации...',
+    'Обрабатываю данные...',
+    'Почти готово...',
+  ];
 
   static const _starterPrompts = [
     'Разбери мои последние тренировки',
@@ -45,6 +57,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
 
   @override
   void dispose() {
+    _sendingMessageTimer?.cancel();
     _scrollController.removeListener(_handleScrollChanged);
     _controller.dispose();
     _scrollController.dispose();
@@ -100,10 +113,23 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
     setState(() {
       _messages.add(_ChatMessage(role: 'user', text: text));
       _isSending = true;
+      _sendingMessageIndex = 0;
       if (preset == null) {
         _controller.clear();
       }
     });
+    _sendingMessageTimer?.cancel();
+    _sendingMessageTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) {
+        if (mounted) {
+          setState(() {
+            _sendingMessageIndex =
+                (_sendingMessageIndex + 1) % _sendingMessages.length;
+          });
+        }
+      },
+    );
     _scrollToBottom();
 
     try {
@@ -153,6 +179,8 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
         );
       });
     } finally {
+      _sendingMessageTimer?.cancel();
+      _sendingMessageTimer = null;
       if (mounted) {
         setState(() => _isSending = false);
         _scrollToBottom();
@@ -455,18 +483,19 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
                                 .withValues(alpha: 0.55),
                             child: Row(
                               children: [
-                                SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: scheme.primary,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Text(
-                                    'AI - коуч анализирует статистику и готовит ответ...',
+                                const _TypingIndicator(),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: AnimatedSwitcher(
+                                    duration:
+                                        const Duration(milliseconds: 300),
+                                    child: Text(
+                                      _sendingMessages[_sendingMessageIndex],
+                                      key: ValueKey(_sendingMessageIndex),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -671,6 +700,65 @@ class _ScrollActionButton extends StatelessWidget {
             child: Icon(icon, color: scheme.primary),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _TypingIndicator extends StatefulWidget {
+  const _TypingIndicator();
+
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return SizedBox(
+      width: 32,
+      height: 16,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (_, __) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(3, (i) {
+              final t = (_controller.value - i / 3) % 1.0;
+              final opacity = (t < 0.5 ? t * 2 : (1 - t) * 2).clamp(0.2, 1.0);
+              return Transform.translate(
+                offset: Offset(0, -3 * (t < 0.5 ? t * 2 : (1 - t) * 2)),
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: opacity),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              );
+            }),
+          );
+        },
       ),
     );
   }

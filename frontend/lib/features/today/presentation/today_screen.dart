@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class _TodayScreenState extends State<TodayScreen> {
   _TodaySummary _summary = const _TodaySummary.empty();
   bool _draftLoading = true;
   bool _templatesLoading = false;
+  bool _aiCoachLoading = false;
 
   @override
   void initState() {
@@ -157,14 +159,9 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<Map<String, dynamic>?> _findUnfinishedWorkout() async {
     try {
-      var workouts = LocalCache.get<List>(CacheKeys.workoutsCache)
-              ?.cast<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList() ??
-          const <Map<String, dynamic>>[];
-      if (workouts.isEmpty) {
-        workouts = await BackendApi.getWorkouts();
-      }
+      // Всегда берём свежие данные с сервера, чтобы не показывать черновик
+      // уже завершённой тренировки из устаревшего кэша.
+      final workouts = await BackendApi.getWorkouts();
       // Берём самую свежую незавершённую тренировку
       final unfinished =
           workouts.where((w) => w['finished_at'] == null).toList();
@@ -224,8 +221,7 @@ class _TodayScreenState extends State<TodayScreen> {
 
     final workoutId = workout['id'] as int?;
 
-    final activeDraftKey =
-        LocalCache.get<String>(CacheKeys.activeWorkoutDraft);
+    final activeDraftKey = LocalCache.get<String>(CacheKeys.activeWorkoutDraft);
     if (activeDraftKey != null) await LocalCache.remove(activeDraftKey);
     await LocalCache.remove(CacheKeys.activeWorkoutDraft);
     if (workoutId != null) {
@@ -371,6 +367,351 @@ class _TodayScreenState extends State<TodayScreen> {
     }
   }
 
+  Future<void> _startFromAiCoach() async {
+    if (_aiCoachLoading) {
+      return;
+    }
+
+    final result = await showModalBottomSheet<({_AiCoachIntensity intensity, String notes})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final notesController = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setSheetState) => SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                12,
+                16,
+                MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Какая нужна интенсивность?',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'AI-коуч соберёт программу на основе истории тренировок.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  ..._AiCoachIntensity.values.map(
+                    (item) => ListTile(
+                      leading: Icon(item.icon),
+                      title: Text(item.title),
+                      subtitle: Text(item.subtitle),
+                      onTap: () => Navigator.of(context).pop(
+                        (
+                          intensity: item,
+                          notes: notesController.text.trim(),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesController,
+                    minLines: 1,
+                    maxLines: 3,
+                    maxLength: 300,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: 'Пожелания к тренировке',
+                      hintText: 'Например: хочу больше ног, устал — сделай легче...',
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      counterStyle: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    final intensity = result.intensity;
+    final userNotes = result.notes;
+
+    setState(() => _aiCoachLoading = true);
+    try {
+      final workouts = await _loadWorkoutsForAiCoach()
+          .catchError((_) => <Map<String, dynamic>>[]);
+      final exerciseCatalog = await _loadExerciseCatalogForAiCoach()
+          .catchError((_) => <Map<String, dynamic>>[]);
+      final response = await BackendApi.generateCoachWorkout(
+        intensityTitle: intensity.title,
+        minExercises: intensity.minExercises,
+        maxExercises: intensity.maxExercises,
+        userNotes: userNotes.isEmpty ? null : userNotes,
+      );
+      final reply = (response['reply'] ?? '').toString().trim();
+      final plan = _decodeAiCoachWorkoutPlan(reply);
+      if (!mounted) {
+        return;
+      }
+
+      final initialExercises = _buildExercisesFromAiCoachPlan(
+        plan.exercises,
+        workouts,
+        exerciseCatalog,
+      );
+      if (initialExercises.isEmpty) {
+        throw const FormatException('empty-plan');
+      }
+
+      await _openWorkout(
+        date: DateTime.now(),
+        name: plan.name,
+        exercises: initialExercises,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final fallback = error is FormatException
+          ? 'AI-коуч вернул программу в неожиданном формате. Попробуйте ещё раз.'
+          : 'Не удалось собрать тренировку от AI-коуча.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BackendApi.describeError(error, fallback: fallback),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _aiCoachLoading = false);
+      }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadWorkoutsForAiCoach() async {
+    final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
+    if (cached != null) {
+      return cached
+          .cast<Map>()
+          .map((entry) => entry.cast<String, dynamic>())
+          .toList();
+    }
+    return BackendApi.getWorkouts();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadExerciseCatalogForAiCoach() async {
+    final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
+    if (cached != null) {
+      return cached
+          .cast<Map>()
+          .map((entry) => entry.cast<String, dynamic>())
+          .toList();
+    }
+    return BackendApi.getExercises();
+  }
+
+  String _buildAiCoachWorkoutPrompt(
+    _AiCoachIntensity intensity,
+    List<Map<String, dynamic>> workouts,
+  ) {
+    final recentWorkoutSummary = _buildRecentWorkoutSummary(workouts);
+    return [
+      'ОБЯЗАТЕЛЬНО учитывай последние тренировки, недавнюю нагрузку и восстановление.',
+      'Не повторяй один в один упражнения и структуру последней и предпоследней тренировки, если только это не необходимо по логике программы.',
+      'Если какая-то группа мышц или движение были сильно нагружены в последних 1-2 тренировках, снизь повторение этой нагрузки или смести акцент.',
+      if (recentWorkoutSummary.isNotEmpty)
+        'Последние тренировки: $recentWorkoutSummary.',
+      'Составь тренировку от AI-коуча на сегодня.',
+      'Используй историю моих прошлых тренировок и доступные мне упражнения.',
+      'Интенсивность: ${intensity.title}.',
+      'Нужно ${intensity.rangeLabel} упражнений.',
+      'Верни только JSON без markdown и без пояснений вне JSON.',
+      'Для тяжёлых базовых упражнений добавляй подводящие подходы в отдельном поле warmup_sets.',
+      'Формат ответа:',
+      '{"name":"Название тренировки","exercises":[{"exercise_name":"Жим лёжа","sets":4,"reps":"6-8","notes":"короткая подсказка","warmup_sets":[{"reps":"10","notes":"лёгкий разминочный"},{"reps":"6","notes":"подводящий"},{"reps":"3","notes":"выход на рабочий вес"}]}]}',
+      'Поле name обязательно.',
+      'В exercises должно быть только ${intensity.minExercises}-${intensity.maxExercises} упражнений.',
+      'exercise_name должен быть строкой.',
+      'sets должен быть целым числом от 1 до 6.',
+      'reps должен быть строкой, например "6-8", "8-10" или "12".',
+      'warmup_sets можно добавлять только там, где они реально нужны.',
+      'В warmup_sets не указывай рабочие подходы, только подводящие.',
+      'notes можно оставить пустым.',
+    ].join(' ');
+  }
+
+  String _buildRecentWorkoutSummary(List<Map<String, dynamic>> workouts) {
+    if (workouts.isEmpty) {
+      return '';
+    }
+
+    final sorted = [...workouts]..sort((a, b) {
+        final aDate = DateTime.tryParse((a['started_at'] ?? '').toString()) ??
+            DateTime(1970);
+        final bDate = DateTime.tryParse((b['started_at'] ?? '').toString()) ??
+            DateTime(1970);
+        return bDate.compareTo(aDate);
+      });
+
+    final recent = sorted.take(3).map((workout) {
+      final startedAt =
+          DateTime.tryParse((workout['started_at'] ?? '').toString())
+              ?.toLocal();
+      final name = (workout['name'] ?? 'Тренировка').toString().trim();
+      final exerciseNames =
+          ((workout['exercises'] as List?)?.cast<dynamic>() ?? const [])
+              .whereType<Map>()
+              .map((item) => (item['exercise_name'] ?? '').toString().trim())
+              .where((name) => name.isNotEmpty)
+              .take(6)
+              .toList();
+      final dateLabel = startedAt == null
+          ? ''
+          : '${startedAt.day.toString().padLeft(2, '0')}.${startedAt.month.toString().padLeft(2, '0')}';
+      final exercisesLabel =
+          exerciseNames.isEmpty ? 'без упражнений' : exerciseNames.join(', ');
+      return '$dateLabel $name: $exercisesLabel';
+    }).toList();
+
+    return recent.join(' | ');
+  }
+
+  _AiCoachWorkoutPlan _decodeAiCoachWorkoutPlan(String rawReply) {
+    final normalized = rawReply.trim();
+    if (normalized.isEmpty) {
+      throw const FormatException('empty-reply');
+    }
+
+    final fencedMatch = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(
+      normalized,
+    );
+    final jsonSource =
+        fencedMatch?.group(1)?.trim() ?? _extractFirstJsonObject(normalized);
+    final decoded = jsonDecode(jsonSource);
+    if (decoded is! Map) {
+      throw const FormatException('invalid-root');
+    }
+    return _AiCoachWorkoutPlan.fromMap(decoded.cast<String, dynamic>());
+  }
+
+  String _extractFirstJsonObject(String value) {
+    final start = value.indexOf('{');
+    final end = value.lastIndexOf('}');
+    if (start == -1 || end == -1 || end <= start) {
+      throw const FormatException('json-not-found');
+    }
+    return value.substring(start, end + 1);
+  }
+
+  List<Map<String, dynamic>> _buildExercisesFromAiCoachPlan(
+    List<_AiCoachExercisePlan> planExercises,
+    List<Map<String, dynamic>> workouts,
+    List<Map<String, dynamic>> exerciseCatalog,
+  ) {
+    final prepared = <Map<String, dynamic>>[];
+    final catalogByNormalizedName = {
+      for (final item in exerciseCatalog)
+        _normalizeExerciseLookupName((item['name'] ?? '').toString()): item,
+    };
+
+    for (var index = 0; index < planExercises.length; index++) {
+      final exercisePlan = planExercises[index];
+      final matchedCatalog = catalogByNormalizedName[
+          _normalizeExerciseLookupName(exercisePlan.exerciseName)];
+      final templateExercise = {
+        'catalog_exercise_id': matchedCatalog?['id'],
+        'exercise_name':
+            (matchedCatalog?['name'] ?? exercisePlan.exerciseName).toString(),
+        'target_sets': exercisePlan.sets,
+        'target_reps': exercisePlan.reps,
+      };
+      final lastExercise = _findLatestExercise(workouts, templateExercise);
+      final lastSets =
+          (lastExercise?['sets'] as List?)?.cast<dynamic>() ?? const [];
+      final lastWeight = lastSets.isNotEmpty
+          ? ((lastSets.last as Map).cast<String, dynamic>()['weight'] as num?)
+              ?.toDouble()
+          : null;
+      final repsHint = _parseRepsHint(
+        exercisePlan.reps,
+        fallbackSets: lastSets,
+      );
+      final warmupSets =
+          List.generate(exercisePlan.warmupSets.length, (warmupIndex) {
+        final warmupPlan = exercisePlan.warmupSets[warmupIndex];
+        return {
+          'position': warmupIndex + 1,
+          'reps': _parseRepsHint(
+            warmupPlan.reps,
+            fallbackSets: const [],
+          ),
+          'weight': null,
+          'set_type': 'warmup',
+          'rpe': null,
+          'notes': warmupPlan.notes,
+        };
+      });
+      final workingSets = List.generate(exercisePlan.sets, (setIndex) {
+        return {
+          'position': warmupSets.length + setIndex + 1,
+          'reps': repsHint,
+          'weight': lastWeight,
+          'set_type': 'work',
+          'rpe': null,
+          'notes': null,
+        };
+      });
+
+      prepared.add({
+        'catalog_exercise_id': matchedCatalog?['id'] as int?,
+        'exercise_name':
+            (matchedCatalog?['name'] ?? exercisePlan.exerciseName).toString(),
+        'position': index + 1,
+        'notes': exercisePlan.notes,
+        'sets': [...warmupSets, ...workingSets],
+      });
+    }
+
+    return prepared;
+  }
+
+  int _parseRepsHint(String rawReps, {required List<dynamic> fallbackSets}) {
+    final normalized = rawReps.trim();
+    if (normalized.contains('-')) {
+      final parts = normalized.split('-');
+      return int.tryParse(parts.last.trim()) ?? 8;
+    }
+    final direct = int.tryParse(normalized);
+    if (direct != null) {
+      return direct;
+    }
+    if (fallbackSets.isNotEmpty) {
+      final lastSet = (fallbackSets.last as Map).cast<String, dynamic>();
+      return (lastSet['reps'] as int?) ?? 8;
+    }
+    return 8;
+  }
+
   List<Map<String, dynamic>> _buildExercisesFromTemplate(
     Map<String, dynamic> template,
     List<Map<String, dynamic>> workouts,
@@ -413,6 +754,7 @@ class _TodayScreenState extends State<TodayScreen> {
             'position': setIndex + 1,
             'reps': repsHint,
             'weight': targetWeight,
+            'set_type': 'work',
             'rpe': null,
             'notes': null,
           };
@@ -468,8 +810,10 @@ class _TodayScreenState extends State<TodayScreen> {
             const SizedBox(height: 14),
             _PrimaryWorkoutCard(
               templatesLoading: _templatesLoading,
+              aiCoachLoading: _aiCoachLoading,
               onStartWorkout: () => _openWorkout(date: DateTime.now()),
               onStartTemplate: _startFromTemplate,
+              onStartAiCoach: _startFromAiCoach,
             ),
             const SizedBox(height: 12),
             if (_draftLoading)
@@ -541,7 +885,8 @@ class _WeekSummaryCard extends StatelessWidget {
                           Theme.of(context).textTheme.headlineSmall?.copyWith(
                                 fontWeight: FontWeight.w900,
                                 height: 1.05,
-                                color: _workoutCountColor(summary.weekCount, summary.weeklyTarget, scheme),
+                                color: _workoutCountColor(summary.weekCount,
+                                    summary.weeklyTarget, scheme),
                               ),
                     ),
                   ],
@@ -622,7 +967,9 @@ class _WeekSummaryCard extends StatelessWidget {
 
   static String _workoutCountLabel(int count) {
     if (count % 10 == 1 && count % 100 != 11) return '$count тренировка';
-    if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20)) {
+    if (count % 10 >= 2 &&
+        count % 10 <= 4 &&
+        (count % 100 < 10 || count % 100 >= 20)) {
       return '$count тренировки';
     }
     return '$count тренировок';
@@ -638,13 +985,17 @@ class _WeekSummaryCard extends StatelessWidget {
 class _PrimaryWorkoutCard extends StatelessWidget {
   const _PrimaryWorkoutCard({
     required this.templatesLoading,
+    required this.aiCoachLoading,
     required this.onStartWorkout,
     required this.onStartTemplate,
+    required this.onStartAiCoach,
   });
 
   final bool templatesLoading;
+  final bool aiCoachLoading;
   final VoidCallback onStartWorkout;
   final VoidCallback onStartTemplate;
+  final VoidCallback onStartAiCoach;
 
   @override
   Widget build(BuildContext context) {
@@ -652,7 +1003,7 @@ class _PrimaryWorkoutCard extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWide = screenWidth >= 720;
     final isCompact = screenWidth < 420;
-    final useStackedActions = screenWidth < 430;
+    final useStackedActions = screenWidth < 520;
 
     return DashboardCard(
       color: Color.alphaBlend(
@@ -685,7 +1036,7 @@ class _PrimaryWorkoutCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '\u0411\u044b\u0441\u0442\u0440\u044b\u0439 \u0441\u0442\u0430\u0440\u0442 \u0438\u0437 \u043f\u0443\u0441\u0442\u043e\u0439 \u0444\u043e\u0440\u043c\u044b \u0438\u043b\u0438 \u043f\u043e \u0448\u0430\u0431\u043b\u043e\u043d\u0443.',
+                  '\u0411\u044b\u0441\u0442\u0440\u044b\u0439 \u0441\u0442\u0430\u0440\u0442 \u0432\u0440\u0443\u0447\u043d\u0443\u044e, \u043f\u043e \u0448\u0430\u0431\u043b\u043e\u043d\u0443 \u0438\u043b\u0438 \u043e\u0442 AI-\u043a\u043e\u0443\u0447\u0430.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                         height: 1.35,
@@ -719,6 +1070,19 @@ class _PrimaryWorkoutCard extends StatelessWidget {
                               '\u0418\u0437 \u0448\u0430\u0431\u043b\u043e\u043d\u0430',
                             ),
                           ),
+                          OutlinedButton.icon(
+                            onPressed: aiCoachLoading ? null : onStartAiCoach,
+                            icon: aiCoachLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.auto_awesome_outlined),
+                            label: const Text('От AI-коуча'),
+                          ),
                         ],
                       )
                     : useStackedActions
@@ -747,6 +1111,23 @@ class _PrimaryWorkoutCard extends StatelessWidget {
                                 label: const Text(
                                   '\u0418\u0437 \u0448\u0430\u0431\u043b\u043e\u043d\u0430',
                                 ),
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                onPressed:
+                                    aiCoachLoading ? null : onStartAiCoach,
+                                icon: aiCoachLoading
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.auto_awesome_outlined,
+                                      ),
+                                label: const Text('От AI-коуча'),
                               ),
                             ],
                           )
@@ -784,6 +1165,30 @@ class _PrimaryWorkoutCard extends StatelessWidget {
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: isCompact ? 5 : 4,
+                                child: OutlinedButton.icon(
+                                  onPressed:
+                                      aiCoachLoading ? null : onStartAiCoach,
+                                  icon: aiCoachLoading
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.auto_awesome_outlined,
+                                        ),
+                                  label: const Text(
+                                    'От AI-коуча',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
               ],
@@ -793,6 +1198,134 @@ class _PrimaryWorkoutCard extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _AiCoachIntensity {
+  quick(
+    title: 'Быстрая',
+    subtitle: '5-6 упражнений',
+    minExercises: 5,
+    maxExercises: 6,
+    icon: Icons.flash_on_outlined,
+  ),
+  standard(
+    title: 'Стандартная',
+    subtitle: '7-8 упражнений',
+    minExercises: 7,
+    maxExercises: 8,
+    icon: Icons.fitness_center_outlined,
+  ),
+  intense(
+    title: 'Усиленная',
+    subtitle: '9-10 упражнений',
+    minExercises: 9,
+    maxExercises: 10,
+    icon: Icons.whatshot_outlined,
+  );
+
+  const _AiCoachIntensity({
+    required this.title,
+    required this.subtitle,
+    required this.minExercises,
+    required this.maxExercises,
+    required this.icon,
+  });
+
+  final String title;
+  final String subtitle;
+  final int minExercises;
+  final int maxExercises;
+  final IconData icon;
+
+  String get rangeLabel => '$minExercises-$maxExercises';
+}
+
+class _AiCoachWorkoutPlan {
+  const _AiCoachWorkoutPlan({
+    required this.name,
+    required this.exercises,
+  });
+
+  factory _AiCoachWorkoutPlan.fromMap(Map<String, dynamic> map) {
+    final rawExercises =
+        (map['exercises'] as List?)?.cast<dynamic>() ?? const [];
+    final exercises = rawExercises
+        .whereType<Map>()
+        .map(
+          (item) => _AiCoachExercisePlan.fromMap(item.cast<String, dynamic>()),
+        )
+        .where((item) => item.exerciseName.isNotEmpty)
+        .toList();
+    final rawName = (map['name'] ?? '').toString().trim();
+    return _AiCoachWorkoutPlan(
+      name: rawName.isEmpty ? 'Тренировка от AI-коуча' : rawName,
+      exercises: exercises,
+    );
+  }
+
+  final String name;
+  final List<_AiCoachExercisePlan> exercises;
+}
+
+class _AiCoachExercisePlan {
+  const _AiCoachExercisePlan({
+    required this.exerciseName,
+    required this.sets,
+    required this.reps,
+    required this.notes,
+    required this.warmupSets,
+  });
+
+  factory _AiCoachExercisePlan.fromMap(Map<String, dynamic> map) {
+    final rawSets = map['sets'];
+    final parsedSets = rawSets is int
+        ? rawSets
+        : rawSets is num
+            ? rawSets.toInt()
+            : int.tryParse(rawSets?.toString() ?? '');
+    return _AiCoachExercisePlan(
+      exerciseName: (map['exercise_name'] ?? '').toString().trim(),
+      sets: (parsedSets ?? 3).clamp(1, 6),
+      reps: (map['reps'] ?? '8-10').toString().trim(),
+      notes: (map['notes'] ?? '').toString().trim().isEmpty
+          ? null
+          : (map['notes'] ?? '').toString().trim(),
+      warmupSets: ((map['warmup_sets'] as List?)?.cast<dynamic>() ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => _AiCoachWarmupSetPlan.fromMap(
+              item.cast<String, dynamic>(),
+            ),
+          )
+          .where((item) => item.reps.isNotEmpty)
+          .toList(),
+    );
+  }
+
+  final String exerciseName;
+  final int sets;
+  final String reps;
+  final String? notes;
+  final List<_AiCoachWarmupSetPlan> warmupSets;
+}
+
+class _AiCoachWarmupSetPlan {
+  const _AiCoachWarmupSetPlan({
+    required this.reps,
+    required this.notes,
+  });
+
+  factory _AiCoachWarmupSetPlan.fromMap(Map<String, dynamic> map) {
+    return _AiCoachWarmupSetPlan(
+      reps: (map['reps'] ?? '').toString().trim(),
+      notes: (map['notes'] ?? '').toString().trim().isEmpty
+          ? null
+          : (map['notes'] ?? '').toString().trim(),
+    );
+  }
+
+  final String reps;
+  final String? notes;
 }
 
 class _DraftCard extends StatelessWidget {
@@ -893,12 +1426,11 @@ class _DraftCard extends StatelessWidget {
                     children: [
                       Text(
                         'ЧЕРНОВИК',
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: scheme.primary.withValues(alpha: 0.8),
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.4,
-                                ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.primary.withValues(alpha: 0.8),
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.4,
+                            ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -1018,42 +1550,46 @@ class _TodayQuote extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 4,
-              color: scheme.primary,
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '«$quote»',
-                      style: textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        fontStyle: FontStyle.italic,
-                        height: 1.45,
-                        color: scheme.onSurface,
-                      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: 4,
+            color: scheme.primary,
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '«$quote»',
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontStyle: FontStyle.italic,
+                      height: 1.45,
+                      color: scheme.onSurface,
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '— $author',
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '— $author',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+String _normalizeExerciseLookupName(String value) {
+  return value.trim().toLowerCase().replaceAll('ё', 'е');
 }

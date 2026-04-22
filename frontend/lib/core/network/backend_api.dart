@@ -215,6 +215,8 @@ class BackendApi {
       await LocalCache.clearSessionData();
       await LocalCache.put(CacheKeys.baseUrl, normalizedBaseUrl);
       await LocalCache.put(CacheKeys.token, token);
+      await LocalCache.put(
+          CacheKeys.currentUserEmail, email.trim().toLowerCase());
       AuthSession.instance.markAuthenticated();
       return token;
     } on DioException catch (error) {
@@ -243,6 +245,8 @@ class BackendApi {
       await LocalCache.clearSessionData();
       await LocalCache.put(CacheKeys.baseUrl, normalizedBaseUrl);
       await LocalCache.put(CacheKeys.token, token);
+      await LocalCache.put(
+          CacheKeys.currentUserEmail, email.trim().toLowerCase());
       AuthSession.instance.markAuthenticated();
       return token;
     } on DioException catch (error) {
@@ -294,6 +298,7 @@ class BackendApi {
                 'position': i + 1,
                 'reps': reps,
                 'weight': weight,
+                'set_type': 'work',
                 'rpe': null,
                 'notes': null,
               },
@@ -729,7 +734,12 @@ class BackendApi {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final response = await dio.get('/api/v1/auth/me');
-      return (response.data as Map).cast<String, dynamic>();
+      final data = (response.data as Map).cast<String, dynamic>();
+      final email = data['email']?.toString().trim().toLowerCase();
+      if (email != null && email.isNotEmpty) {
+        await LocalCache.put(CacheKeys.currentUserEmail, email);
+      }
+      return data;
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить профиль пользователя.');
@@ -738,18 +748,49 @@ class BackendApi {
 
   static Future<Map<String, dynamic>> chatWithCoach({
     required List<Map<String, String>> messages,
+    bool saveHistory = true,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final response = await dio.post(
         '/api/v1/coach/chat',
-        data: {'messages': messages},
+        data: {
+          'messages': messages,
+          'save_history': saveHistory,
+        },
       );
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (error) {
       _throwFriendlyError(
         error,
         defaultMessage: 'Не удалось получить ответ AI - коуча.',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> generateCoachWorkout({
+    required String intensityTitle,
+    required int minExercises,
+    required int maxExercises,
+    String? userNotes,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.post(
+        '/api/v1/coach/generate-workout',
+        data: {
+          'intensity_title': intensityTitle,
+          'min_exercises': minExercises,
+          'max_exercises': maxExercises,
+          if (userNotes != null && userNotes.isNotEmpty)
+            'user_notes': userNotes,
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось собрать тренировку от AI-коуча.',
       );
     }
   }
@@ -765,6 +806,98 @@ class BackendApi {
       _throwFriendlyError(
         error,
         defaultMessage: 'Не удалось загрузить историю AI - коуча.',
+      );
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getOwnerCoachHistory() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/coach/owner/history');
+      final data =
+          (response.data['messages'] as List).cast<Map<String, dynamic>>();
+      return data;
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage:
+            'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¾Ð±Ñ‰ÑƒÑŽ Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ð¹ Ðº AI - ÐºÐ¾ÑƒÑ‡Ñƒ.',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getActiveAnnouncement() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/announcements/active');
+      final envelope = (response.data as Map).cast<String, dynamic>();
+      final announcement = envelope['announcement'];
+      if (announcement is Map<String, dynamic>) {
+        return announcement;
+      }
+      if (announcement is Map) {
+        return announcement.cast<String, dynamic>();
+      }
+      return null;
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось загрузить информационное сообщение.',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getAdminCurrentAnnouncement() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/announcements/admin/current');
+      final envelope = (response.data as Map).cast<String, dynamic>();
+      final announcement = envelope['announcement'];
+      if (announcement is Map<String, dynamic>) {
+        return announcement;
+      }
+      if (announcement is Map) {
+        return announcement.cast<String, dynamic>();
+      }
+      return null;
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось загрузить текущее сообщение.',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> publishAnnouncement({
+    required String title,
+    required String body,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.post(
+        '/api/v1/announcements/admin/current',
+        data: {
+          'title': title,
+          'body': body,
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось опубликовать сообщение.',
+      );
+    }
+  }
+
+  static Future<void> clearAnnouncement() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      await dio.delete('/api/v1/announcements/admin/current');
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось отключить сообщение.',
       );
     }
   }

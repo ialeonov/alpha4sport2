@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/backend_api.dart';
+import '../../../core/storage/local_cache.dart';
 import '../../../core/theme/theme_notifier.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
@@ -7,8 +9,11 @@ import '../../body/presentation/body_screen.dart';
 import '../../coach/presentation/ai_coach_screen.dart';
 import '../../programs/presentation/programs_screen.dart';
 import '../../templates/presentation/templates_screen.dart';
+import 'admin_functions_screen.dart';
 
-class MoreScreen extends StatelessWidget {
+class MoreScreen extends StatefulWidget {
+  static const _ownerEmail = 'ialeonov@yandex.ru';
+
   const MoreScreen({
     super.key,
     required this.onLogout,
@@ -17,6 +22,37 @@ class MoreScreen extends StatelessWidget {
 
   final Future<void> Function() onLogout;
   final Future<void> Function() onOpenSocialHub;
+
+  @override
+  State<MoreScreen> createState() => _MoreScreenState();
+}
+
+class _MoreScreenState extends State<MoreScreen> {
+  String? _currentUserEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentUserEmail = LocalCache.get<String>(CacheKeys.currentUserEmail)
+        ?.trim()
+        .toLowerCase();
+    if (_currentUserEmail == null || _currentUserEmail!.isEmpty) {
+      _restoreCurrentUserEmail();
+    }
+  }
+
+  Future<void> _restoreCurrentUserEmail() async {
+    try {
+      final user = await BackendApi.getCurrentUser();
+      if (!mounted) return;
+      setState(() {
+        _currentUserEmail = user['email']?.toString().trim().toLowerCase();
+      });
+    } catch (_) {
+      // Quietly ignore: the owner-only tile should stay hidden if the profile
+      // couldn't be restored.
+    }
+  }
 
   void _openPage(
     BuildContext context, {
@@ -36,20 +72,16 @@ class MoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isOwner = _currentUserEmail == MoreScreen._ownerEmail;
 
     return AppBackdrop(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
         children: [
-          const DashboardSummaryCard(
-            subtitle: 'Инструменты и разделы',
-            title: 'Инструменты',
-          ),
+          const ScreenTitle('Инструменты'),
           const SizedBox(height: 16),
-          const DashboardSectionLabel('Инструменты'),
-          const SizedBox(height: 10),
           _MoreTile(
-            title: 'AI - коуч',
+            title: 'AI-коуч',
             subtitle:
                 'Чат с тренером, который видит твою статистику и помогает разбирать прогресс.',
             icon: Icons.smart_toy_rounded,
@@ -58,6 +90,21 @@ class MoreScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const AiCoachScreen()),
             ),
           ),
+          if (isOwner) ...[
+            const SizedBox(height: 10),
+            _MoreTile(
+              title: 'Админ функции',
+              subtitle:
+                  'История AI-коуча и глобальные сообщения для всех пользователей.',
+              icon: Icons.admin_panel_settings_rounded,
+              iconColor: const Color(0xFF7A5A0A),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AdminFunctionsScreen(),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           _MoreTile(
             title: 'Упражнения',
@@ -114,13 +161,13 @@ class MoreScreen extends StatelessWidget {
             subtitle: 'Профиль, пользователи и лента событий в одном разделе.',
             icon: Icons.groups_2_rounded,
             iconColor: scheme.secondary,
-            onTap: () => onOpenSocialHub(),
+            onTap: () => widget.onOpenSocialHub(),
           ),
           const SizedBox(height: 8),
           Divider(color: scheme.outlineVariant.withValues(alpha: 0.3)),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: onLogout,
+            onPressed: widget.onLogout,
             icon: const Icon(Icons.logout_rounded),
             label: const Text('Выйти из аккаунта'),
             style: OutlinedButton.styleFrom(
@@ -185,8 +232,9 @@ class _ThemeToggleTileState extends State<_ThemeToggleTile> {
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
-          child:
-              Text(isDark ? 'Переключить на светлую' : 'Переключить на тёмную'),
+          child: Text(
+            isDark ? 'Переключить на светлую' : 'Переключить на тёмную',
+          ),
         ),
         trailing: Switch(
           value: !isDark,

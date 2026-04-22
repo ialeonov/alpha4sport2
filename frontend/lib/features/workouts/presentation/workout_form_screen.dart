@@ -38,6 +38,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   static const String _newWorkoutDraftKey = 'workout_draft_new';
 
   late final TextEditingController _nameController;
+  late final TextEditingController _workoutNoteController;
   late final PageCloseGuard _pageCloseGuard;
   late final ScrollController _scrollController;
   late DateTime _selectedDate;
@@ -113,6 +114,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               'Тренировка ${formatShortDate(DateTime.now())}')
           .toString(),
     );
+    _workoutNoteController = TextEditingController(
+      text: (sourceWorkout?['notes'] ?? '').toString(),
+    );
 
     final exercises = sourceWorkout != null
         ? (sourceWorkout['exercises'] as List?)?.cast<dynamic>() ?? const []
@@ -145,6 +149,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _pageCloseGuard.dispose();
     _scrollController.dispose();
     _nameController.dispose();
+    _workoutNoteController.dispose();
     for (final exercise in _exercises) {
       exercise.dispose();
     }
@@ -335,13 +340,18 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
         if (sets.isEmpty) {
           continue;
         }
-        final rawSet = (sets.last as Map).cast<String, dynamic>();
-        final reps = (rawSet['reps'] as num?)?.toInt();
-        final weight = (rawSet['weight'] as num?)?.toDouble();
-        if (reps == null || weight == null) {
-          continue;
+        for (final rawSet in sets.reversed) {
+          final set = (rawSet as Map).cast<String, dynamic>();
+          if ((set['set_type'] ?? 'work').toString() == 'warmup') {
+            continue;
+          }
+          final reps = (set['reps'] as num?)?.toInt();
+          final weight = (set['weight'] as num?)?.toDouble();
+          if (reps == null || weight == null) {
+            continue;
+          }
+          return _WorkingSetSummary(reps: reps, weight: weight);
         }
-        return _WorkingSetSummary(reps: reps, weight: weight);
       }
     }
     return null;
@@ -489,6 +499,65 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     if (result != null) {
       setState(() {
         exercise.noteController.text = result!;
+      });
+      _handleDraftChanged();
+    }
+  }
+
+  Future<void> _openWorkoutNoteDialog() async {
+    final tempController =
+        TextEditingController(text: _workoutNoteController.text);
+    String? result;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: const Text('Заметка к тренировке'),
+          content: TextField(
+            controller: tempController,
+            autofocus: true,
+            maxLines: 6,
+            minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              hintText: 'Как прошла тренировка? Самочувствие, условия...',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Отмена'),
+            ),
+            if (_workoutNoteController.text.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  result = '';
+                  Navigator.of(ctx).pop();
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: scheme.error,
+                ),
+                child: const Text('Удалить'),
+              ),
+            FilledButton(
+              onPressed: () {
+                result = tempController.text.trim();
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Сохранить'),
+            ),
+          ],
+        );
+      },
+    );
+    tempController.dispose();
+    if (result != null) {
+      setState(() {
+        _workoutNoteController.text = result!;
       });
       _handleDraftChanged();
     }
@@ -745,9 +814,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   }
 
   Map<String, dynamic> _buildDraftSnapshot() {
+    final workoutNote = _workoutNoteController.text.trim();
     return {
       if (_workoutId != null) 'id': _workoutId,
       'name': _nameController.text.trim(),
+      'notes': workoutNote.isEmpty ? null : workoutNote,
       'started_at': _startedAt.toIso8601String(),
       'finished_at': _finishedAt?.toIso8601String(),
       'exercises': List.generate(_exercises.length, (exerciseIndex) {
@@ -764,6 +835,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               'position': setIndex + 1,
               'reps': int.tryParse(set.repsController.text.trim()) ?? 0,
               'weight': _parseWeight(set.weightController.text),
+              'set_type': set.setType,
               'rpe': set.rpe,
               'notes': null,
             };
@@ -783,7 +855,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     return double.tryParse(normalized);
   }
 
-  List<Map<String, dynamic>>? _buildExercisesPayload() {
+  List<Map<String, dynamic>>? _buildExercisesPayload({
+    bool showValidationError = true,
+  }) {
     final exercisesPayload = <Map<String, dynamic>>[];
     for (var exerciseIndex = 0;
         exerciseIndex < _exercises.length;
@@ -791,9 +865,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
       final exercise = _exercises[exerciseIndex];
       final exerciseName = exercise.nameController.text.trim();
       if (exercise.catalogExerciseId == null || exerciseName.isEmpty) {
-        _showError(
-          'Выберите упражнение из каталога для блока #${exerciseIndex + 1}.',
-        );
+        if (showValidationError) {
+          _showError(
+            'Выберите упражнение из каталога для блока #${exerciseIndex + 1}.',
+          );
+        }
         return null;
       }
 
@@ -803,21 +879,26 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
         final reps = int.tryParse(set.repsController.text.trim());
         final weight = _parseWeight(set.weightController.text);
         if (reps == null) {
-          _showError(
-            'Введите повторы для подхода ${setIndex + 1} в упражнении "$exerciseName".',
-          );
+          if (showValidationError) {
+            _showError(
+              'Введите повторы для подхода ${setIndex + 1} в упражнении "$exerciseName".',
+            );
+          }
           return null;
         }
         if (set.weightController.text.trim().isNotEmpty && weight == null) {
-          _showError(
-            'Введите корректный вес для подхода ${setIndex + 1} в упражнении "$exerciseName".',
-          );
+          if (showValidationError) {
+            _showError(
+              'Введите корректный вес для подхода ${setIndex + 1} в упражнении "$exerciseName".',
+            );
+          }
           return null;
         }
         setsPayload.add({
           'position': setIndex + 1,
           'reps': reps,
           'weight': weight,
+          'set_type': set.setType,
           'rpe': set.rpe,
           'notes': null,
         });
@@ -843,25 +924,45 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     return _startedAt.add(const Duration(hours: 1));
   }
 
-  Future<void> _saveWorkout({required bool finishWorkout}) async {
+  Future<void> _saveWorkout({
+    required bool finishWorkout,
+    bool showValidationError = true,
+    DateTime? overrideStartedAt,
+    DateTime? overrideFinishedAt,
+  }) async {
     if (_savingToServer) {
       return;
     }
 
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _showError('Введите название тренировки.');
+      if (showValidationError) {
+        _showError('Введите название тренировки.');
+      } else if (mounted) {
+        setState(() => _saveStatus = _SaveStatus.error);
+      } else {
+        _saveStatus = _SaveStatus.error;
+      }
       return;
     }
 
-    final exercisesPayload = _buildExercisesPayload();
+    final exercisesPayload = _buildExercisesPayload(
+      showValidationError: showValidationError,
+    );
     if (exercisesPayload == null) {
+      if (mounted) {
+        setState(() => _saveStatus = _SaveStatus.error);
+      } else {
+        _saveStatus = _SaveStatus.error;
+      }
       return;
     }
 
-    final finishedAt = finishWorkout
-        ? _resolveFinishedAt()
-        : (_isFinished ? _finishedAt ?? _resolveFinishedAt() : null);
+    final effectiveStartedAt = overrideStartedAt ?? _startedAt;
+    final finishedAt = overrideFinishedAt ??
+        (finishWorkout
+            ? _resolveFinishedAt()
+            : (_isFinished ? _finishedAt ?? _resolveFinishedAt() : null));
 
     setState(() {
       _savingToServer = true;
@@ -869,18 +970,21 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     });
 
     try {
+      final workoutNote = _workoutNoteController.text.trim();
       final result = _isEditing
           ? await BackendApi.updateWorkout(
               workoutId: _workoutId!,
               name: name,
+              notes: workoutNote.isEmpty ? null : workoutNote,
               exercises: exercisesPayload,
-              startedAt: _startedAt,
+              startedAt: effectiveStartedAt,
               finishedAt: finishedAt,
             )
           : await BackendApi.createWorkoutDetailed(
               name: name,
+              notes: workoutNote.isEmpty ? null : workoutNote,
               exercises: exercisesPayload,
-              startedAt: _startedAt,
+              startedAt: effectiveStartedAt,
               finishedAt: finishedAt,
             );
 
@@ -1008,8 +1112,17 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   Future<void> _handleMinimize() async {
     if (_savingToServer) return;
     if (_hasUnsavedChanges || !_isEditing) {
-      await _saveWorkout(finishWorkout: false);
-      if (!mounted || _saveStatus == _SaveStatus.error) return;
+      await _saveWorkout(
+        finishWorkout: false,
+        showValidationError: false,
+      );
+      if (!mounted) return;
+      if (_saveStatus == _SaveStatus.error) {
+        await _persistDraftSnapshot(syncedWithServer: false);
+        if (!mounted) return;
+        Navigator.of(context).pop(_didChangeServerData);
+        return;
+      }
     }
     if (mounted) {
       Navigator.of(context).pop(_didChangeServerData);
@@ -1017,29 +1130,20 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   }
 
   Future<void> _handleFinishPressed() async {
-    final shouldFinish = await showDialog<bool>(
+    final result = await showDialog<({DateTime startedAt, DateTime finishedAt})>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Завершить тренировку?'),
-        content: const Text(
-          'После завершения тренировка перестанет храниться как черновик. Если захотите что-то поменять позже, изменения нужно будет сохранять сразу.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Завершить'),
-          ),
-        ],
+      builder: (context) => _FinishWorkoutDialog(
+        initialStartedAt: _startedAt,
+        initialFinishedAt: _resolveFinishedAt(),
+        selectedDate: _selectedDate,
       ),
     );
-    if (shouldFinish != true) {
-      return;
-    }
-    await _saveWorkout(finishWorkout: true);
+    if (result == null) return;
+    await _saveWorkout(
+      finishWorkout: true,
+      overrideStartedAt: result.startedAt,
+      overrideFinishedAt: result.finishedAt,
+    );
   }
 
   void _showError(String message) {
@@ -1090,6 +1194,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               'position': setIndex + 1,
               'reps': int.tryParse(set.repsController.text.trim()) ?? 0,
               'weight': _parseWeight(set.weightController.text),
+              'set_type': set.setType,
             };
           }),
         };
@@ -1244,6 +1349,90 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                         : Icons.fitness_center,
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: _openWorkoutNoteDialog,
+                child: _workoutNoteController.text.isNotEmpty
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: scheme.secondary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: scheme.secondary.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 1),
+                              child: Icon(
+                                Icons.sticky_note_2_outlined,
+                                size: 14,
+                                color: scheme.secondary,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _workoutNoteController.text,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.edit_outlined,
+                              size: 13,
+                              color: scheme.onSurfaceVariant
+                                  .withValues(alpha: 0.45),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: scheme.outlineVariant.withValues(alpha: 0.3),
+                            style: BorderStyle.solid,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.sticky_note_2_outlined,
+                              size: 14,
+                              color: scheme.onSurfaceVariant
+                                  .withValues(alpha: 0.45),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Добавить заметку к тренировке',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.6),
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
               const SizedBox(height: 12),
               if (_catalogError != null)
@@ -1427,15 +1616,73 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                                     else if (lastSetState
                                                             ?.lastSet !=
                                                         null)
-                                                      Text(
-                                                        'Последний рабочий: ${formatWeight(lastSetState!.lastSet!.weight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .bodySmall
-                                                            ?.copyWith(
-                                                              color: scheme
-                                                                  .onSurfaceVariant,
-                                                            ),
+                                                      Builder(
+                                                        builder: (context) {
+                                                          final lastWeight =
+                                                              lastSetState!
+                                                                  .lastSet!
+                                                                  .weight
+                                                                  .toDouble();
+                                                          final currentMax = exercise
+                                                              .sets
+                                                              .where((s) =>
+                                                                  s.setType ==
+                                                                  'work')
+                                                              .map((s) =>
+                                                                  double.tryParse(
+                                                                      s.weightController
+                                                                          .text) ??
+                                                                  0.0)
+                                                              .fold(
+                                                                  0.0,
+                                                                  (a, b) =>
+                                                                      a > b
+                                                                          ? a
+                                                                          : b);
+                                                          final hasDelta =
+                                                              currentMax > 0 &&
+                                                                  currentMax !=
+                                                                      lastWeight;
+                                                          final isUp =
+                                                              currentMax >
+                                                                  lastWeight;
+                                                          return Row(
+                                                            mainAxisSize:
+                                                                MainAxisSize
+                                                                    .min,
+                                                            children: [
+                                                              Text(
+                                                                'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
+                                                                style: Theme.of(
+                                                                        context)
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                      color: scheme
+                                                                          .onSurfaceVariant,
+                                                                    ),
+                                                              ),
+                                                              if (hasDelta) ...[
+                                                                const SizedBox(
+                                                                    width: 4),
+                                                                Icon(
+                                                                  isUp
+                                                                      ? Icons
+                                                                          .arrow_upward_rounded
+                                                                      : Icons
+                                                                          .arrow_downward_rounded,
+                                                                  size: 12,
+                                                                  color: isUp
+                                                                      ? Colors
+                                                                          .green
+                                                                          .shade500
+                                                                      : scheme
+                                                                          .error,
+                                                                ),
+                                                              ],
+                                                            ],
+                                                          );
+                                                        },
                                                       )
                                                     else
                                                       Text(
@@ -1604,12 +1851,20 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                 padding: EdgeInsets.only(
                                   bottom: setIndex == exercise.sets.length - 1
                                       ? 0
-                                      : 4,
+                                      : 2,
                                 ),
                                 child: _WorkoutSetRow(
                                   index: setIndex,
                                   set: set,
                                   onChanged: _handleDraftChanged,
+                                  onToggleWarmup: () {
+                                    setState(() {
+                                      set.setType = set.setType == 'warmup'
+                                          ? 'work'
+                                          : 'warmup';
+                                    });
+                                    _handleDraftChanged();
+                                  },
                                   onDelete: exercise.sets.length == 1
                                       ? null
                                       : () =>
@@ -1617,37 +1872,23 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                 ),
                               );
                             }),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: FilledButton.icon(
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
                                 onPressed: () => _addSet(exerciseIndex),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Theme.of(context)
-                                      .colorScheme
-                                      .secondary
-                                      .withValues(alpha: 0.18),
-                                  foregroundColor:
-                                      Theme.of(context).colorScheme.secondary,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    side: BorderSide(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .secondary
-                                          .withValues(alpha: 0.35),
-                                    ),
-                                  ),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: scheme.secondary,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
                                 ),
-                                icon: const Icon(Icons.add_circle_outline,
-                                    size: 20),
-                                label: const Text(
-                                  'Добавить подход',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
+                                icon: const Icon(
+                                    Icons.add_circle_outline_rounded,
+                                    size: 16),
+                                label: const Text('подход',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w600)),
                               ),
                             ),
                           ] else ...[
@@ -1792,6 +2033,7 @@ class _SetDraft {
     required this.repsController,
     required this.weightController,
     required this.containerKey,
+    this.setType = 'work',
     this.rpe,
   });
 
@@ -1809,6 +2051,7 @@ class _SetDraft {
       weightController:
           TextEditingController(text: source.weightController.text),
       containerKey: GlobalKey(),
+      setType: source.setType,
       rpe: source.rpe,
     );
   }
@@ -1821,6 +2064,7 @@ class _SetDraft {
         text: map['weight'] == null ? '' : map['weight'].toString(),
       ),
       containerKey: GlobalKey(),
+      setType: (map['set_type'] ?? 'work').toString(),
       rpe: map['rpe'] == null ? null : (map['rpe'] as num).toDouble(),
     );
   }
@@ -1828,6 +2072,7 @@ class _SetDraft {
   final TextEditingController repsController;
   final TextEditingController weightController;
   final GlobalKey containerKey;
+  String setType;
   double? rpe;
 
   void dispose() {
@@ -1954,12 +2199,14 @@ class _WorkoutSetRow extends StatelessWidget {
     required this.index,
     required this.set,
     required this.onChanged,
+    required this.onToggleWarmup,
     this.onDelete,
   });
 
   final int index;
   final _SetDraft set;
   final VoidCallback onChanged;
+  final VoidCallback onToggleWarmup;
   final VoidCallback? onDelete;
 
   @override
@@ -1990,22 +2237,38 @@ class _WorkoutSetRow extends StatelessWidget {
       children: [
         Row(
           children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                '${index + 1}',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant,
-                    ),
-              ),
-            ),
+            Builder(builder: (context) {
+              final isWarmup = set.setType == 'warmup';
+              final isFilled = !isWarmup &&
+                  (double.tryParse(set.weightController.text) ?? 0) > 0 &&
+                  (int.tryParse(set.repsController.text) ?? 0) > 0;
+              final bgColor = isWarmup
+                  ? Colors.amber.withValues(alpha: 0.2)
+                  : isFilled
+                      ? scheme.primaryContainer.withValues(alpha: 0.7)
+                      : scheme.surfaceContainerHighest;
+              final fgColor = isWarmup
+                  ? Colors.amber.shade700
+                  : isFilled
+                      ? scheme.onPrimaryContainer
+                      : scheme.onSurfaceVariant;
+              return Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  isWarmup ? 'Р' : '${index + 1}',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: fgColor,
+                      ),
+                ),
+              );
+            }),
             const SizedBox(width: 10),
             if (isMobile) Expanded(child: weightField) else weightField,
             Padding(
@@ -2022,12 +2285,18 @@ class _WorkoutSetRow extends StatelessWidget {
             const SizedBox(width: 8),
             _RpeChip(
               rpe: set.rpe,
+              isWarmup: set.setType == 'warmup',
               onTap: () {
                 showModalBottomSheet<void>(
                   context: context,
                   useRootNavigator: true,
                   builder: (_) => _RpePickerSheet(
                     currentRpe: set.rpe,
+                    isWarmup: set.setType == 'warmup',
+                    onToggleWarmup: () {
+                      Navigator.of(context).pop();
+                      onToggleWarmup();
+                    },
                     onSelected: (value) {
                       set.rpe = value;
                       onChanged();
@@ -2129,25 +2398,71 @@ Color _rpeColor(double rpe) {
 }
 
 class _RpeChip extends StatelessWidget {
-  const _RpeChip({required this.rpe, required this.onTap});
+  const _RpeChip({
+    required this.rpe,
+    required this.isWarmup,
+    required this.onTap,
+  });
 
   final double? rpe;
+  final bool isWarmup;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasValue = rpe != null;
-    final color = hasValue ? _rpeColor(rpe!) : scheme.onSurfaceVariant;
-    final bgColor = hasValue
-        ? _rpeColor(rpe!).withValues(alpha: 0.15)
-        : scheme.surfaceContainerHighest.withValues(alpha: 0.6);
-    final borderColor = hasValue
-        ? _rpeColor(rpe!).withValues(alpha: 0.5)
-        : scheme.outlineVariant.withValues(alpha: 0.4);
-    final label = hasValue
-        ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}'
-        : '@—';
+
+    final Color color;
+    final Color bgColor;
+    final Color borderColor;
+
+    if (isWarmup) {
+      color = scheme.tertiary;
+      bgColor = scheme.tertiary.withValues(alpha: 0.15);
+      borderColor = scheme.tertiary.withValues(alpha: 0.5);
+    } else if (rpe != null) {
+      color = _rpeColor(rpe!);
+      bgColor = _rpeColor(rpe!).withValues(alpha: 0.15);
+      borderColor = _rpeColor(rpe!).withValues(alpha: 0.5);
+    } else {
+      color = scheme.onSurfaceVariant;
+      bgColor = scheme.surfaceContainerHighest.withValues(alpha: 0.6);
+      borderColor = scheme.outlineVariant.withValues(alpha: 0.4);
+    }
+
+    Widget child;
+    if (isWarmup && rpe == null) {
+      child = Icon(Icons.whatshot_outlined, size: 18, color: color);
+    } else if (isWarmup) {
+      final rpeLabel = rpe! % 1 == 0 ? rpe!.toInt().toString() : rpe.toString();
+      child = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.whatshot_outlined, size: 12, color: color),
+          const SizedBox(width: 2),
+          Text(
+            rpeLabel,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                  fontSize: 13,
+                ),
+          ),
+        ],
+      );
+    } else {
+      final label = rpe != null
+          ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}'
+          : '@—';
+      child = Text(
+        label,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color,
+              fontSize: 13,
+            ),
+      );
+    }
 
     return GestureDetector(
       onTap: onTap,
@@ -2160,14 +2475,7 @@ class _RpeChip extends StatelessWidget {
           border: Border.all(color: borderColor),
         ),
         alignment: Alignment.center,
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: color,
-                fontSize: 13,
-              ),
-        ),
+        child: child,
       ),
     );
   }
@@ -2176,10 +2484,14 @@ class _RpeChip extends StatelessWidget {
 class _RpePickerSheet extends StatelessWidget {
   const _RpePickerSheet({
     required this.currentRpe,
+    required this.isWarmup,
+    required this.onToggleWarmup,
     required this.onSelected,
   });
 
   final double? currentRpe;
+  final bool isWarmup;
+  final VoidCallback onToggleWarmup;
   final ValueChanged<double?> onSelected;
 
   static const _values = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
@@ -2231,6 +2543,51 @@ class _RpePickerSheet extends StatelessWidget {
                     color: scheme.onSurfaceVariant,
                   ),
             ),
+            const SizedBox(height: 14),
+            InkWell(
+              onTap: onToggleWarmup,
+              borderRadius: BorderRadius.circular(14),
+              child: Ink(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isWarmup
+                      ? scheme.tertiary.withValues(alpha: 0.14)
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isWarmup
+                        ? scheme.tertiary.withValues(alpha: 0.4)
+                        : scheme.outlineVariant.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.whatshot_outlined,
+                      size: 18,
+                      color:
+                          isWarmup ? scheme.tertiary : scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Разминочный подход',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color:
+                                  isWarmup ? scheme.tertiary : scheme.onSurface,
+                            ),
+                      ),
+                    ),
+                    Switch.adaptive(
+                      value: isWarmup,
+                      onChanged: (_) => onToggleWarmup(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             GridView.builder(
               shrinkWrap: true,
@@ -2246,8 +2603,9 @@ class _RpePickerSheet extends StatelessWidget {
                 final value = _values[i];
                 final color = _rpeColor(value);
                 final isSelected = currentRpe == value;
-                final label =
-                    value % 1 == 0 ? value.toInt().toString() : value.toString();
+                final label = value % 1 == 0
+                    ? value.toInt().toString()
+                    : value.toString();
                 return GestureDetector(
                   onTap: () {
                     Navigator.of(context).pop();
@@ -2261,9 +2619,8 @@ class _RpePickerSheet extends StatelessWidget {
                           : color.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: isSelected
-                            ? color
-                            : color.withValues(alpha: 0.4),
+                        color:
+                            isSelected ? color : color.withValues(alpha: 0.4),
                         width: isSelected ? 2 : 1,
                       ),
                     ),
@@ -2381,4 +2738,182 @@ class _WorkingSetSummary {
 
   final int reps;
   final double weight;
+}
+
+class _FinishWorkoutDialog extends StatefulWidget {
+  const _FinishWorkoutDialog({
+    required this.initialStartedAt,
+    required this.initialFinishedAt,
+    required this.selectedDate,
+  });
+
+  final DateTime initialStartedAt;
+  final DateTime initialFinishedAt;
+  final DateTime selectedDate;
+
+  @override
+  State<_FinishWorkoutDialog> createState() => _FinishWorkoutDialogState();
+}
+
+class _FinishWorkoutDialogState extends State<_FinishWorkoutDialog> {
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTime = TimeOfDay.fromDateTime(widget.initialStartedAt);
+    _endTime = TimeOfDay.fromDateTime(widget.initialFinishedAt);
+  }
+
+  DateTime _toDateTime(TimeOfDay time) => DateTime(
+        widget.selectedDate.year,
+        widget.selectedDate.month,
+        widget.selectedDate.day,
+        time.hour,
+        time.minute,
+      );
+
+  String _formatTime(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  int _durationMinutes() {
+    final start = _toDateTime(_startTime);
+    final end = _toDateTime(_endTime);
+    return end.difference(start).inMinutes;
+  }
+
+  Future<void> _pickStartTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _startTime,
+    );
+    if (picked != null) setState(() => _startTime = picked);
+  }
+
+  Future<void> _pickEndTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _endTime,
+    );
+    if (picked != null) setState(() => _endTime = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final durationMin = _durationMinutes();
+    final durationLabel = durationMin > 0
+        ? durationMin >= 60
+            ? '${durationMin ~/ 60} ч ${durationMin % 60} мин'
+            : '$durationMin мин'
+        : '—';
+
+    return AlertDialog(
+      title: const Text('Завершить тренировку?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Проверьте время тренировки — оно попадёт в отчёты.',
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _TimeField(
+                  label: 'Начало',
+                  value: _formatTime(_startTime),
+                  onTap: _pickStartTime,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _TimeField(
+                  label: 'Конец',
+                  value: _formatTime(_endTime),
+                  onTap: _pickEndTime,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Длительность: $durationLabel',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: durationMin > 0
+              ? () => Navigator.of(context).pop((
+                    startedAt: _toDateTime(_startTime),
+                    finishedAt: _toDateTime(_endTime),
+                  ))
+              : null,
+          child: const Text('Завершить'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TimeField extends StatelessWidget {
+  const _TimeField({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: scheme.outline),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Text(
+                  value,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const Spacer(),
+                Icon(Icons.access_time, size: 16, color: scheme.primary),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -25,6 +25,7 @@ dependencies:
   flutter_markdown: ^0.7.7+1
 
   cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -33,6 +34,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Bebas Neue Cyrillic
+      fonts:
+        - asset: assets/fonts/BebasNeue-Cyrillic.ttf
   assets:
     - assets/branding/logo-full.png
     - assets/branding/logo-full.svg

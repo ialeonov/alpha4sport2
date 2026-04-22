@@ -296,6 +296,7 @@ class WorkoutExportService {
             _normalizeInt(set['position'] ?? set['set_index']) ?? setIndex + 1,
         'reps': _normalizeInt(set['reps']) ?? 0,
         'weight': _normalizeNumber(set['weight']),
+        'set_type': (set['set_type'] ?? 'work').toString(),
         'rpe': _normalizeNumber(set['rpe']),
         'notes': importedNote.isEmpty ? null : importedNote,
       });
@@ -306,6 +307,7 @@ class WorkoutExportService {
         'position': 1,
         'reps': 0,
         'weight': null,
+        'set_type': 'work',
         'rpe': null,
         'notes': null,
       });
@@ -371,6 +373,7 @@ class WorkoutExportService {
       final set = rawSet.cast<String, dynamic>();
       final reps = _normalizeNumber(set['reps']);
       final weight = _normalizeNumber(set['weight']);
+      final setType = (set['set_type'] ?? 'work').toString();
       final rpe = _normalizeNumber(set['rpe']);
       final setIndex = _normalizeInt(set['position']) ?? index + 1;
       final setNotes = (set['notes'] ?? '').toString().trim();
@@ -378,6 +381,7 @@ class WorkoutExportService {
         'set_index': setIndex,
         'reps': reps,
         'weight': weight,
+        'set_type': setType,
         'rpe': rpe,
         if (setNotes.isNotEmpty) 'notes': setNotes,
       };
@@ -407,6 +411,7 @@ class WorkoutExportService {
           : {
               'reps': bestSet['reps'],
               'weight': bestSet['weight'],
+              if (bestSet['set_type'] != null) 'set_type': bestSet['set_type'],
               if (bestSet['rpe'] != null) 'rpe': bestSet['rpe'],
             },
     };

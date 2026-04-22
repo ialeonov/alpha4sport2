@@ -11,6 +11,7 @@ class ShareUserInfo {
     this.displayName,
     this.resolvedAvatarUrl,
     this.totalWorkouts,
+    this.title,
   });
 
   final String? displayName;
@@ -19,6 +20,10 @@ class ShareUserInfo {
   final String? resolvedAvatarUrl;
 
   final int? totalWorkouts;
+
+  /// Title from the progression system (e.g. 'Ветеран'). Takes priority over
+  /// the workout-count fallback.
+  final String? title;
 
   String get initials {
     final name = displayName?.trim() ?? '';
@@ -31,6 +36,7 @@ class ShareUserInfo {
   }
 
   String get levelLabel {
+    if (title != null && title!.isNotEmpty) return title!;
     final n = totalWorkouts ?? 0;
     if (n < 10) return 'Новичок';
     if (n < 30) return 'Атлет';
@@ -145,7 +151,7 @@ class WorkoutShareCard extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   // ── Exercise list ──────────────────────────────────
-                  _buildSectionLabel('УПРАЖНЕНИЯ · ЛУЧШИЙ ПОДХОД'),
+                  _buildSectionLabel('УПРАЖНЕНИЯ', trailing: 'ЛУЧШИЙ ПОДХОД'),
                   const SizedBox(height: 8),
                   _buildExerciseList(exercises),
 
@@ -413,24 +419,26 @@ class WorkoutShareCard extends StatelessWidget {
 
   // ── Section label ─────────────────────────────────────────────────────
 
-  Widget _buildSectionLabel(String label) {
+  Widget _buildSectionLabel(String label, {String? trailing}) {
+    const labelStyle = TextStyle(
+      color: _textSecondary,
+      fontSize: 9,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 2.0,
+    );
     return Row(
       children: [
         Container(width: 2.5, height: 11, color: _accent),
         const SizedBox(width: 7),
-        Text(
-          label,
-          style: const TextStyle(
-            color: _textSecondary,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2.0,
-          ),
-        ),
+        Text(label, style: labelStyle),
         const SizedBox(width: 8),
         const Expanded(
           child: Divider(color: _divider, thickness: 1, height: 1),
         ),
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          Text(trailing, style: labelStyle),
+        ],
       ],
     );
   }
