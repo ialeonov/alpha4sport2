@@ -414,7 +414,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
                                   ]);
                                   return true;
                                 } catch (error) {
-                                  if (!mounted) return false;
+                                  if (!context.mounted) return false;
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(

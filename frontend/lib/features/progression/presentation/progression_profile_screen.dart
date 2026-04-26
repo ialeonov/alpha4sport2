@@ -566,14 +566,12 @@ class _MetricGridItem {
     required this.title,
     required this.value,
     required this.subtitle,
-    this.caption,
     this.accent,
   });
 
   final String title;
   final String value;
   final String subtitle;
-  final String? caption;
   final _MetricAccent? accent;
 }
 
@@ -668,25 +666,6 @@ class _MetricTile extends StatelessWidget {
               height: 1.35,
             ),
           ),
-          if (item.caption != null) ...[
-            const SizedBox(height: 6),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: (accentColor ?? scheme.onSurfaceVariant)
-                    .withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                item.caption!,
-                style: textTheme.labelSmall?.copyWith(
-                  color: accentColor ?? scheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );

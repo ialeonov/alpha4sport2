@@ -16,18 +16,26 @@ const _colorAttention = Color(0xFFE65100);
 const _colorKeep = Color(0xFF546E7A);
 
 Color _decisionColor(ExerciseProgressAnalysis a) {
-  if (a.decision == ProgressDecision.increase) return _colorIncrease;
+  if (a.decision == ProgressDecision.increase) {
+    return _colorIncrease;
+  }
   if (a.decision == ProgressDecision.decrease ||
       a.decision == ProgressDecision.insufficientData ||
-      a.isStalled) return _colorAttention;
+      a.isStalled) {
+    return _colorAttention;
+  }
   return _colorKeep;
 }
 
 int _decisionPriority(ExerciseProgressAnalysis a) {
-  if (a.decision == ProgressDecision.increase) return 0;
+  if (a.decision == ProgressDecision.increase) {
+    return 0;
+  }
   if (a.decision == ProgressDecision.decrease ||
       a.decision == ProgressDecision.insufficientData ||
-      a.isStalled) return 1;
+      a.isStalled) {
+    return 1;
+  }
   return 2;
 }
 
@@ -45,86 +53,24 @@ class _ProgressData {
 class _ProgressStats {
   const _ProgressStats({
     required this.totalExercises,
-    required this.totalWorkouts,
     required this.readyCount,
     required this.attentionCount,
     required this.keepCount,
-    required this.overallTrendPct,
   });
 
   final int totalExercises;
-  final int totalWorkouts;
   final int readyCount;
   final int attentionCount;
   final int keepCount;
-  final double overallTrendPct;
 }
 
 _ProgressStats _computeStats(ProgressAnalysisReport report) {
-  final allDates = <String>{};
-  var trendSum = 0.0;
-  var trendCount = 0;
-  for (final ex in report.allExercises) {
-    for (final s in ex.sessions) {
-      allDates.add(
-          '${s.performedAt.year}-${s.performedAt.month}-${s.performedAt.day}');
-    }
-    if (ex.sessions.length >= 2) {
-      final first = ex.sessions.first.workingSet.estimated1rm;
-      final last = ex.sessions.last.workingSet.estimated1rm;
-      if (first > 0) {
-        trendSum += (last - first) / first * 100;
-        trendCount++;
-      }
-    }
-  }
   return _ProgressStats(
     totalExercises: report.allExercises.length,
-    totalWorkouts: allDates.length,
     readyCount: report.readyToIncrease.length,
     attentionCount: report.attentionNeeded.length,
     keepCount: report.keepWorking.length,
-    overallTrendPct: trendCount > 0 ? trendSum / trendCount : 0,
   );
-}
-
-// ── Top growth ───────────────────────────────────────────────────────────────
-
-class _ExerciseGrowth {
-  const _ExerciseGrowth({
-    required this.name,
-    required this.growthPct,
-    required this.firstRm,
-    required this.lastRm,
-    required this.sessionCount,
-  });
-  final String name;
-  final double growthPct;
-  final double firstRm;
-  final double lastRm;
-  final int sessionCount;
-}
-
-List<_ExerciseGrowth> _computeTopGrowth(ProgressAnalysisReport report,
-    {int count = 3}) {
-  final list = <_ExerciseGrowth>[];
-  for (final ex in report.allExercises) {
-    if (ex.sessions.length < 2) continue;
-    final first = ex.sessions.first.workingSet.estimated1rm;
-    final last = ex.sessions.last.workingSet.estimated1rm;
-    if (first <= 0) continue;
-    final pct = (last - first) / first * 100;
-    if (pct <= 0) continue;
-    list.add(_ExerciseGrowth(
-      name: ex.exerciseName,
-      growthPct: pct,
-      firstRm: first,
-      lastRm: last,
-      sessionCount: ex.sessions.length,
-    ));
-  }
-  list.sort((a, b) => b.growthPct.compareTo(a.growthPct));
-  return list.take(count).toList();
 }
 
 // ── Personal records ─────────────────────────────────────────────────────────
@@ -217,9 +163,9 @@ class _ProgressScreenState extends State<ProgressScreen>
       _loadTemplates(),
       _loadCatalog(),
     ]);
-    final workouts = results[0] as List<Map<String, dynamic>>;
-    final templates = results[1] as List<Map<String, dynamic>>;
-    final catalog = results[2] as List<Map<String, dynamic>>;
+    final workouts = results[0];
+    final templates = results[1];
+    final catalog = results[2];
 
     final report =
         _service.buildReport(workouts: workouts, templates: templates);
@@ -237,7 +183,10 @@ class _ProgressScreenState extends State<ProgressScreen>
     } catch (_) {
       final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
       if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+        return cached
+            .cast<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
       }
       rethrow;
     }
@@ -249,7 +198,10 @@ class _ProgressScreenState extends State<ProgressScreen>
     } catch (_) {
       final cached = LocalCache.get<List>(CacheKeys.templatesCache);
       if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+        return cached
+            .cast<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
       }
       return const [];
     }
@@ -259,10 +211,12 @@ class _ProgressScreenState extends State<ProgressScreen>
     try {
       return await BackendApi.getExercises();
     } catch (_) {
-      final cached =
-          LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
+      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
       if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+        return cached
+            .cast<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList();
       }
       return const [];
     }
@@ -336,13 +290,10 @@ class _ProgressScreenState extends State<ProgressScreen>
             children: [
               // ── Fixed header ──────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ScreenTitle('Прогресс'),
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                child: const ScreenHeader(title: 'Прогресс'),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               // ── Tab bar ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -354,6 +305,10 @@ class _ProgressScreenState extends State<ProgressScreen>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
+                    _StatisticsTab(
+                      report: report,
+                      onRefresh: _refresh,
+                    ),
                     _RecommendationsTab(
                       report: report,
                       stats: stats,
@@ -365,11 +320,6 @@ class _ProgressScreenState extends State<ProgressScreen>
                       }),
                       onSearchChanged: () => setState(() {}),
                       applyFilter: _applyFilter,
-                      onRefresh: _refresh,
-                    ),
-                    _StatisticsTab(
-                      report: report,
-                      stats: stats,
                       onRefresh: _refresh,
                     ),
                   ],
@@ -393,35 +343,46 @@ class _StyledTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      height: 42,
+      height: 50,
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.2)),
+        borderRadius: BorderRadius.circular(18),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.62),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: TabBar(
         controller: controller,
         indicator: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: scheme.primary.withValues(alpha: 0.18),
-          border: Border.all(
-              color: scheme.primary.withValues(alpha: 0.45)),
+          borderRadius: BorderRadius.circular(14),
+          color: scheme.primary,
+          boxShadow: [
+            BoxShadow(
+              color: scheme.primary.withValues(alpha: 0.22),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: Colors.transparent,
-        labelColor: scheme.primary,
+        labelColor: scheme.onPrimary,
         unselectedLabelColor: scheme.onSurfaceVariant,
-        labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+        labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+        unselectedLabelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
             ),
-        unselectedLabelStyle:
-            Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
         tabs: const [
-          Tab(text: 'Рекомендации'),
           Tab(text: 'Статистика'),
+          Tab(text: 'Рекомендации'),
         ],
       ),
     );
@@ -448,8 +409,8 @@ class _RecommendationsTab extends StatelessWidget {
   final _FilterTab activeFilter;
   final ValueChanged<_FilterTab> onFilterChanged;
   final VoidCallback onSearchChanged;
-  final List<ExerciseProgressAnalysis> Function(
-      ProgressAnalysisReport, String) applyFilter;
+  final List<ExerciseProgressAnalysis> Function(ProgressAnalysisReport, String)
+      applyFilter;
   final Future<void> Function() onRefresh;
 
   @override
@@ -510,17 +471,14 @@ class _RecommendationsTab extends StatelessWidget {
 class _StatisticsTab extends StatelessWidget {
   const _StatisticsTab({
     required this.report,
-    required this.stats,
     required this.onRefresh,
   });
 
   final ProgressAnalysisReport report;
-  final _ProgressStats stats;
   final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    final topGrowth = _computeTopGrowth(report);
     final records = _computeRecords(report);
 
     return RefreshIndicator(
@@ -528,20 +486,6 @@ class _StatisticsTab extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
         children: [
-          if (topGrowth.isNotEmpty) ...[
-            const DashboardSectionLabel('Топ прогресса'),
-            const SizedBox(height: 10),
-            ...topGrowth.asMap().entries.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _TopGrowthCard(
-                      rank: entry.key + 1,
-                      growth: entry.value,
-                    ),
-                  ),
-                ),
-            const SizedBox(height: 6),
-          ],
           if (records.isNotEmpty) ...[
             const DashboardSectionLabel('Личные рекорды'),
             const SizedBox(height: 10),
@@ -558,13 +502,19 @@ class _StatisticsTab extends StatelessWidget {
                 'Недостаточно истории для статистики.',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
+            )
+          else if (records.isEmpty)
+            DashboardCard(
+              child: Text(
+                'Личных рекордов пока нет.',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
             ),
         ],
       ),
     );
   }
 }
-
 
 // ── Distribution bar ──────────────────────────────────────────────────────────
 
@@ -583,6 +533,30 @@ class _DistributionBar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (stats.attentionCount > 0) ...[
+            RichText(
+              text: TextSpan(
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurface,
+                      height: 1.4,
+                    ),
+                children: [
+                  TextSpan(
+                    text: '${stats.attentionCount} упражнений',
+                    style: const TextStyle(
+                      color: _colorAttention,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const TextSpan(
+                    text:
+                        ' давно не прогрессируют — пора добавить нагрузку или сменить схему.',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           Text(
             'РАСПРЕДЕЛЕНИЕ',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -634,14 +608,13 @@ class _DistributionBar extends StatelessWidget {
               ],
               if (stats.keepCount > 0) ...[
                 _DistLegend(
-                    color: _colorKeep,
-                    label: '${stats.keepCount} норма'),
+                    color: _colorKeep, label: '${stats.keepCount} норма'),
                 const SizedBox(width: 14),
               ],
               if (stats.attentionCount > 0)
                 _DistLegend(
                     color: _colorAttention,
-                    label: '${stats.attentionCount} внимание'),
+                    label: '${stats.attentionCount} застой'),
             ],
           ),
         ],
@@ -663,8 +636,8 @@ class _DistLegend extends StatelessWidget {
         Container(
           width: 8,
           height: 8,
-          decoration:
-              BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+          decoration: BoxDecoration(
+              color: color, borderRadius: BorderRadius.circular(2)),
         ),
         const SizedBox(width: 5),
         Text(
@@ -722,7 +695,7 @@ class _CategoryFilter extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _FilterChip(
-            label: 'Внимание',
+            label: 'Застой',
             count: stats.attentionCount,
             isActive: active == _FilterTab.attention,
             activeColor: _colorAttention,
@@ -777,14 +750,12 @@ class _FilterChip extends StatelessWidget {
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: isActive ? color : scheme.onSurfaceVariant,
-                    fontWeight:
-                        isActive ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                   ),
             ),
             const SizedBox(width: 6),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
                 color: isActive
@@ -801,92 +772,6 @@ class _FilterChip extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ── Top growth card ───────────────────────────────────────────────────────────
-
-class _TopGrowthCard extends StatelessWidget {
-  const _TopGrowthCard({required this.rank, required this.growth});
-  final int rank;
-  final _ExerciseGrowth growth;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final rankColors = [
-      const Color(0xFFFFD700),
-      const Color(0xFFC0C0C0),
-      const Color(0xFFCD7F32),
-    ];
-    final rankColor = rank <= 3 ? rankColors[rank - 1] : scheme.onSurfaceVariant;
-
-    return DashboardCard(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: rankColor.withValues(alpha: 0.15),
-              border: Border.all(color: rankColor.withValues(alpha: 0.4)),
-            ),
-            child: Center(
-              child: Text(
-                '#$rank',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: rankColor,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  growth.name,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${_formatWeight(growth.firstRm)} → ${_formatWeight(growth.lastRm)} кг · ${growth.sessionCount} трен',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: _colorIncrease.withValues(alpha: 0.15),
-              border: Border.all(
-                  color: _colorIncrease.withValues(alpha: 0.35)),
-            ),
-            child: Text(
-              '+${growth.growthPct.toStringAsFixed(1)}%',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: _colorIncrease,
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -937,7 +822,8 @@ class _RecordCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   color: gold.withValues(alpha: 0.12),
@@ -961,10 +847,11 @@ class _RecordCard extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 4, bottom: 4),
                       child: Text(
                         'кг × ${current.reps}',
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                              color: gold.withValues(alpha: 0.75),
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: gold.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w700,
+                                ),
                       ),
                     ),
                   ],
@@ -996,7 +883,8 @@ class _RecordCard extends StatelessWidget {
                     Text(
                       '· ${formatShortDate(e.date)}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                            color:
+                                scheme.onSurfaceVariant.withValues(alpha: 0.6),
                           ),
                     ),
                   ],
@@ -1030,8 +918,7 @@ class _ExerciseDetailCard extends StatelessWidget {
         analysis.isStalled;
 
     final weightPrefix = isIncrease ? '↑ ' : (isDecrease ? '↓ ' : '');
-    final weightColor =
-        (isIncrease || isAttention) ? color : scheme.onSurface;
+    final weightColor = (isIncrease || isAttention) ? color : scheme.onSurface;
     final hasDelta = analysis.deltaWeight.abs() > 0.01;
 
     final subtitleParts = [
@@ -1049,8 +936,8 @@ class _ExerciseDetailCard extends StatelessWidget {
             scheme.secondary.withValues(alpha: 0.07),
             scheme.surfaceContainerLow,
           ),
-          border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.22)),
+          border:
+              Border.all(color: scheme.outlineVariant.withValues(alpha: 0.22)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.09),
@@ -1074,8 +961,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                     .copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: const EdgeInsets.fromLTRB(22, 10, 14, 10),
-                  childrenPadding:
-                      const EdgeInsets.fromLTRB(22, 0, 18, 18),
+                  childrenPadding: const EdgeInsets.fromLTRB(22, 0, 18, 18),
                   title: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1171,8 +1057,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                   '${formatShortDate(session.performedAt)} · '
                                   '${_formatWeight(session.workingSet.weight)} кг'
                                   ' × ${session.workingSet.reps}',
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ),
                               Text(
@@ -1180,8 +1065,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
-                                    ?.copyWith(
-                                        color: scheme.onSurfaceVariant),
+                                    ?.copyWith(color: scheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -1241,8 +1125,7 @@ class _CombinedProgressChart extends StatefulWidget {
   final List<ExerciseSessionPerformance> sessions;
 
   @override
-  State<_CombinedProgressChart> createState() =>
-      _CombinedProgressChartState();
+  State<_CombinedProgressChart> createState() => _CombinedProgressChartState();
 }
 
 class _CombinedProgressChartState extends State<_CombinedProgressChart> {
@@ -1279,8 +1162,7 @@ class _CombinedProgressChartState extends State<_CombinedProgressChart> {
 
     final normValues =
         sessions.map((s) => s.workingSet.normalizedWeight).toList();
-    final rmValues =
-        sessions.map((s) => s.workingSet.estimated1rm).toList();
+    final rmValues = sessions.map((s) => s.workingSet.estimated1rm).toList();
     final allValues = [...normValues, ...rmValues];
     final minY = allValues.reduce((a, b) => a < b ? a : b) * 0.94;
     final maxY = allValues.reduce((a, b) => a > b ? a : b) * 1.06;
@@ -1365,26 +1247,24 @@ class _CombinedProgressChartState extends State<_CombinedProgressChart> {
                 clipData: const FlClipData.all(),
                 lineTouchData: LineTouchData(
                   touchCallback: (event, response) {
-                    final idx =
-                        response?.lineBarSpots?.firstOrNull?.spotIndex;
+                    final idx = response?.lineBarSpots?.firstOrNull?.spotIndex;
                     if (_touchedIndex != idx) {
                       setState(() => _touchedIndex = idx);
                     }
                   },
-                  getTouchedSpotIndicator: (barData, spotIndexes) =>
-                      spotIndexes
-                          .map((_) => TouchedSpotIndicatorData(
-                                FlLine(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withValues(alpha: 0.18),
-                                  strokeWidth: 1.5,
-                                  dashArray: [4, 4],
-                                ),
-                                const FlDotData(show: false),
-                              ))
-                          .toList(),
+                  getTouchedSpotIndicator: (barData, spotIndexes) => spotIndexes
+                      .map((_) => TouchedSpotIndicatorData(
+                            FlLine(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.18),
+                              strokeWidth: 1.5,
+                              dashArray: [4, 4],
+                            ),
+                            const FlDotData(show: false),
+                          ))
+                      .toList(),
                   touchTooltipData: LineTouchTooltipData(
                     getTooltipColor: (_) =>
                         Theme.of(context).colorScheme.inverseSurface,

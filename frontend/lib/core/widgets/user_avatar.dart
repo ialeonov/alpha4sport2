@@ -20,7 +20,6 @@ class UserAvatar extends StatefulWidget {
 
 class _UserAvatarState extends State<UserAvatar> {
   bool _imageError = false;
-  String? _lastResolvedUrl;
 
   String? _resolveUrl(String? url) {
     if (url == null || url.isEmpty) return null;
@@ -44,10 +43,6 @@ class _UserAvatarState extends State<UserAvatar> {
     final fullUrl = _resolveUrl(widget.avatarUrl);
     final showImage = fullUrl != null && !_imageError;
     final fontSize = widget.radius * 0.85;
-
-    if (showImage) {
-      _lastResolvedUrl = fullUrl;
-    }
 
     return CircleAvatar(
       radius: widget.radius,

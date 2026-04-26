@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 class ScreenTitle extends StatelessWidget {
   const ScreenTitle(this.text, {super.key});
   final String text;
@@ -8,35 +9,169 @@ class ScreenTitle extends StatelessWidget {
     final color = Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFFE8C7AA)
         : Theme.of(context).colorScheme.onSurface;
-    const style = TextStyle(
+    final isWide = MediaQuery.sizeOf(context).width >= 900;
+    final style = TextStyle(
       fontFamily: 'Bebas Neue Cyrillic',
-      fontSize: 44,
-      letterSpacing: 2,
-      height: 1,
+      fontSize: isWide ? 58 : 50,
+      letterSpacing: isWide ? 2.2 : 1.2,
+      height: 0.96,
+      color: color,
     );
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final tp = TextPainter(
-            text: TextSpan(text: text.toUpperCase(), style: style),
-            textDirection: TextDirection.ltr,
-          )..layout(maxWidth: double.infinity);
-          final scaleX = constraints.maxWidth / tp.width;
-          return SizedBox(
-            width: constraints.maxWidth,
-            height: tp.height,
-            child: Transform.scale(
-              scaleX: scaleX,
-              scaleY: 1.0,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                text.toUpperCase(),
-                style: style.copyWith(color: color),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text.toUpperCase(),
+          maxLines: 1,
+          softWrap: false,
+          style: style,
+        ),
+      ),
+    );
+  }
+}
+
+class ScreenHeader extends StatelessWidget {
+  const ScreenHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.actions = const [],
+    this.metrics = const [],
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<Widget> actions;
+  final List<Widget> metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 900;
+    final titleColor = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFE8C7AA)
+        : scheme.onSurface;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Bebas Neue Cyrillic',
+                      fontSize: isWide ? 48 : 40,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: isWide ? 1.8 : 1.1,
+                      height: 0.94,
+                      color: titleColor,
+                    ),
+                  ),
+                  if (subtitle != null && subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                    ),
+                  ],
+                ],
               ),
             ),
-          );
-        },
+            if (actions.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              Wrap(
+                spacing: 8,
+                children: actions,
+              ),
+            ],
+          ],
+        ),
+        if (metrics.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: [
+                for (var i = 0; i < metrics.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  metrics[i],
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class HeaderMetricChip extends StatelessWidget {
+  const HeaderMetricChip({
+    super.key,
+    required this.label,
+    required this.value,
+    this.color,
+    this.icon,
+  });
+
+  final String label;
+  final String value;
+  final Color? color;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final effectiveColor = color ?? scheme.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: effectiveColor.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: effectiveColor.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 15, color: effectiveColor),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            value,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: effectiveColor,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
       ),
     );
   }

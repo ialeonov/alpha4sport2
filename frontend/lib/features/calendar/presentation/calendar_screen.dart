@@ -22,7 +22,7 @@ class CalendarScreen extends StatefulWidget {
 }
 
 class CalendarScreenState extends State<CalendarScreen> {
-  static const _calendarCellHeight = 62.0;
+  static const _calendarCellHeight = 52.0;
   static const _weekdayLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   static const _monthLabels = [
     'Январь',
@@ -844,7 +844,7 @@ class CalendarScreenState extends State<CalendarScreen> {
         DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0).day;
     final leadingEmpty = first.weekday - 1;
     final scheme = Theme.of(context).colorScheme;
-    final buttonWidth = compact ? 28.0 : 36.0;
+    final buttonWidth = compact ? 24.0 : 32.0;
 
     final cellDates = <DateTime?>[];
     final cellWidgets = <Widget>[];
@@ -860,8 +860,6 @@ class CalendarScreenState extends State<CalendarScreen> {
       final hasWorkouts = dayWorkouts.isNotEmpty;
       final isSelected = DateUtils.isSameDay(date, _selectedDay);
       final isToday = DateUtils.isSameDay(date, DateTime.now());
-      final dotCount = dayWorkouts.length.clamp(1, 3);
-
       cellDates.add(date);
       cellWidgets.add(
         InkWell(
@@ -887,8 +885,8 @@ class CalendarScreenState extends State<CalendarScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: compact ? 24 : 28,
-                  height: compact ? 24 : 28,
+                  width: compact ? 20 : 26,
+                  height: compact ? 20 : 26,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: isToday && !isSelected
@@ -899,7 +897,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                     child: Text(
                       '$day',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontSize: compact ? 12 : 13,
+                            fontSize: compact ? 11 : 13,
                             color: isSelected
                                 ? scheme.onPrimary
                                 : isToday
@@ -912,27 +910,20 @@ class CalendarScreenState extends State<CalendarScreen> {
                     ),
                   ),
                 ),
-                SizedBox(height: compact ? 3 : 4),
+                SizedBox(height: compact ? 1 : 3),
                 if (hasWorkouts)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      dotCount,
-                      (_) => Container(
-                        width: compact ? 4 : 5,
-                        height: compact ? 4 : 5,
-                        margin: const EdgeInsets.symmetric(horizontal: 1),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isSelected
-                              ? scheme.onPrimary.withValues(alpha: 0.85)
-                              : scheme.primary,
-                        ),
-                      ),
+                  Container(
+                    width: compact ? 3 : 5,
+                    height: compact ? 3 : 5,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected
+                          ? scheme.onPrimary.withValues(alpha: 0.85)
+                          : scheme.primary,
                     ),
                   )
                 else
-                  SizedBox(height: compact ? 4 : 5),
+                  SizedBox(height: compact ? 3 : 5),
               ],
             ),
           ),
@@ -1047,7 +1038,7 @@ class CalendarScreenState extends State<CalendarScreen> {
     final scheme = Theme.of(context).colorScheme;
     final screenWidth = MediaQuery.of(context).size.width;
     final compactCalendar = screenWidth < 420;
-    final cellHeight = compactCalendar ? 46.0 : _calendarCellHeight;
+    final cellHeight = compactCalendar ? 36.0 : _calendarCellHeight;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -1082,10 +1073,20 @@ class CalendarScreenState extends State<CalendarScreen> {
                 return RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 96),
                     children: [
-                      const ScreenTitle('Календарь'),
-                      const SizedBox(height: 14),
+                      ScreenHeader(
+                        title: 'Календарь',
+                        subtitle: '$monthLabel · ${_selectedDayLabel()}',
+                        actions: [
+                          HeaderMetricChip(
+                            value: '$monthCount',
+                            label: 'за месяц',
+                            color: scheme.primary,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                       Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 1100),
@@ -1097,8 +1098,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                             borderColor:
                                 scheme.outlineVariant.withValues(alpha: 0.28),
                             child: Padding(
-                              padding:
-                                  EdgeInsets.all(compactCalendar ? 10 : 14),
+                              padding: EdgeInsets.all(compactCalendar ? 8 : 12),
                               child: Column(
                                 children: [
                                   Row(
@@ -1118,11 +1118,15 @@ class CalendarScreenState extends State<CalendarScreen> {
                                                   .textTheme
                                                   .titleLarge
                                                   ?.copyWith(
+                                                      fontSize: compactCalendar
+                                                          ? 20
+                                                          : null,
                                                       fontWeight:
                                                           FontWeight.w800),
                                             ),
-                                            if (monthCount > 0) ...[
-                                              const SizedBox(height: 2),
+                                            if (monthCount > 0 &&
+                                                !compactCalendar) ...[
+                                              const SizedBox(height: 1),
                                               Text(
                                                 'Тренировок: $monthCount',
                                                 textAlign: TextAlign.center,
@@ -1146,36 +1150,33 @@ class CalendarScreenState extends State<CalendarScreen> {
                                       ),
                                     ],
                                   ),
-                                  SizedBox(height: compactCalendar ? 6 : 8),
+                                  SizedBox(height: compactCalendar ? 3 : 6),
                                   Row(
                                     children: [
-                                      ..._weekdayLabels
-                                          .map(
-                                            (label) => Expanded(
-                                              child: Text(
-                                                label,
-                                                textAlign: TextAlign.center,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .labelMedium
-                                                    ?.copyWith(
-                                                      fontSize: compactCalendar
-                                                          ? 11
-                                                          : null,
-                                                      color: scheme
-                                                          .onSurfaceVariant,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                              ),
-                                            ),
-                                          )
-                                          .toList(),
+                                      ..._weekdayLabels.map(
+                                        (label) => Expanded(
+                                          child: Text(
+                                            label,
+                                            textAlign: TextAlign.center,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
+                                                  fontSize: compactCalendar
+                                                      ? 11
+                                                      : null,
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ),
+                                      ),
                                       SizedBox(
                                           width: compactCalendar ? 28.0 : 36.0),
                                     ],
                                   ),
-                                  SizedBox(height: compactCalendar ? 4 : 6),
+                                  SizedBox(height: compactCalendar ? 2 : 5),
                                   ..._buildWeekRows(
                                     byDay,
                                     cellHeight,
@@ -1189,10 +1190,10 @@ class CalendarScreenState extends State<CalendarScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: compactCalendar ? 10 : 14),
                       DashboardSectionLabel(
                           'Тренировки за ${_selectedDayLabel()}'),
-                      const SizedBox(height: 12),
+                      SizedBox(height: compactCalendar ? 8 : 10),
                       if (selectedDayWorkouts.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1255,9 +1256,9 @@ class CalendarScreenState extends State<CalendarScreen> {
                                 ),
                               ),
                               child: DashboardCard(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 14,
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: compactCalendar ? 12 : 18,
+                                  vertical: compactCalendar ? 10 : 14,
                                 ),
                                 onTap: () => _openEditWorkout(workout),
                                 child: LayoutBuilder(
@@ -1345,13 +1346,16 @@ class CalendarScreenState extends State<CalendarScreen> {
                                             context,
                                             workout,
                                             exerciseCatalog,
-                                            width: 132,
+                                            width: compactCalendar ? 104 : 132,
                                           ),
-                                          const SizedBox(width: 14),
+                                          SizedBox(
+                                              width: compactCalendar ? 10 : 14),
                                           Expanded(
                                             child: ConstrainedBox(
-                                              constraints: const BoxConstraints(
-                                                  minHeight: 132),
+                                              constraints: BoxConstraints(
+                                                  minHeight: compactCalendar
+                                                      ? 104
+                                                      : 132),
                                               child: Column(
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.start,
@@ -1379,7 +1383,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                                                         workout),
                                                     style: Theme.of(context)
                                                         .textTheme
-                                                        .bodyMedium
+                                                        .bodySmall
                                                         ?.copyWith(
                                                           color: scheme
                                                               .onSurfaceVariant,
@@ -1450,45 +1454,76 @@ class CalendarScreenState extends State<CalendarScreen> {
                           );
                         },
                       ),
-                      const SizedBox(height: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          FilledButton.icon(
-                            onPressed: _openAddWorkoutOptions,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Добавить тренировку'),
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: selectedDayWorkouts.isEmpty
-                                      ? null
-                                      : () => _exportSelectedDayWorkouts(
-                                            selectedDayWorkouts,
-                                          ),
-                                  icon: const Icon(Icons.file_download_outlined,
-                                      size: 18),
-                                  label: const Text('Тренировку'),
-                                ),
+                      SizedBox(height: compactCalendar ? 4 : 8),
+                      if (compactCalendar)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: _openAddWorkoutOptions,
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Добавить'),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _exportWorkoutRange(workouts),
-                                  icon: const Icon(
-                                      Icons.download_for_offline_outlined,
-                                      size: 18),
-                                  label: const Text('Диапазон'),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.outlined(
+                              onPressed: selectedDayWorkouts.isEmpty
+                                  ? null
+                                  : () => _exportSelectedDayWorkouts(
+                                        selectedDayWorkouts,
+                                      ),
+                              tooltip: 'Экспорт тренировки',
+                              icon: const Icon(Icons.file_download_outlined),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.outlined(
+                              onPressed: () => _exportWorkoutRange(workouts),
+                              tooltip: 'Экспорт диапазона',
+                              icon: const Icon(
+                                  Icons.download_for_offline_outlined),
+                            ),
+                          ],
+                        )
+                      else
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _openAddWorkoutOptions,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Добавить тренировку'),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: selectedDayWorkouts.isEmpty
+                                        ? null
+                                        : () => _exportSelectedDayWorkouts(
+                                              selectedDayWorkouts,
+                                            ),
+                                    icon: const Icon(
+                                        Icons.file_download_outlined,
+                                        size: 18),
+                                    label: const Text('Тренировку'),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _exportWorkoutRange(workouts),
+                                    icon: const Icon(
+                                        Icons.download_for_offline_outlined,
+                                        size: 18),
+                                    label: const Text('Диапазон'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                 );

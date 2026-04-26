@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:typed_data';
-
 import 'package:file_selector/file_selector.dart';
 
 import '../../../core/network/backend_api.dart';
@@ -479,21 +478,6 @@ class WorkoutExportService {
       return value.toInt();
     }
     return int.tryParse(value?.toString() ?? '');
-  }
-
-  double _calculateSetVolume({
-    required num? reps,
-    required num? weight,
-  }) {
-    final repsValue = (reps ?? 0).toDouble();
-    final weightValue = (weight ?? 0).toDouble();
-    if (repsValue <= 0) {
-      return 0;
-    }
-    if (weightValue <= 0) {
-      return repsValue;
-    }
-    return repsValue * weightValue;
   }
 
   Map<String, dynamic>? _pickBestSet({

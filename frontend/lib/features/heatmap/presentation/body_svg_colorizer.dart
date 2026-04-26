@@ -1,6 +1,5 @@
 import 'package:xml/xml.dart';
 
-import '../data/muscle_heatmap_asset_loader.dart';
 import '../domain/muscle_heatmap_color_resolver.dart';
 import '../domain/muscle_heatmap_models.dart';
 

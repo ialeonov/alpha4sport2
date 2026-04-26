@@ -1052,4 +1052,41 @@ class BackendApi {
       _throwFriendlyError(error, defaultMessage: 'Не удалось поставить лайк.');
     }
   }
+
+  static Future<Map<String, dynamic>> getFitnessProfile() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/users/me/fitness-profile');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить фитнес-профиль.');
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateFitnessProfile({
+    String? goal,
+    String? experience,
+    String? gender,
+    String? injuries,
+    int? daysPerWeek,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.put(
+        '/api/v1/users/me/fitness-profile',
+        data: {
+          'goal': goal,
+          'experience': experience,
+          'gender': gender,
+          'injuries': injuries,
+          'daysPerWeek': daysPerWeek,
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось сохранить фитнес-профиль.');
+    }
+  }
 }

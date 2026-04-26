@@ -59,9 +59,8 @@ class MuscleHeatmapCard extends StatelessWidget {
         final svgSource = _buildSvg(assetData);
 
         final content = Padding(
-          padding: showCard
-              ? const EdgeInsets.all(18)
-              : const EdgeInsets.all(8),
+          padding:
+              showCard ? const EdgeInsets.all(18) : const EdgeInsets.all(8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -87,21 +86,19 @@ class MuscleHeatmapCard extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color:
-                      scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final heatmapWidth =
-                        constraints.maxWidth.clamp(0.0, 380.0);
+                    final heatmapWidth = constraints.maxWidth.clamp(0.0, 380.0);
                     return Center(
                       child: SizedBox(
                         width: heatmapWidth,
                         child: AspectRatio(
                           aspectRatio: 597.8 / 608.2,
-                          child: SvgPicture.string(svgSource,
-                              fit: BoxFit.contain),
+                          child:
+                              SvgPicture.string(svgSource, fit: BoxFit.contain),
                         ),
                       ),
                     );
@@ -195,7 +192,7 @@ class WorkoutHeatmapPreview extends StatelessWidget {
 
         return Container(
           width: previewWidth,
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerHighest.withValues(alpha: 0.28),
             borderRadius: BorderRadius.circular(22),
@@ -203,13 +200,6 @@ class WorkoutHeatmapPreview extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Карта нагрузки',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-              ),
-              const SizedBox(height: 8),
               AspectRatio(
                 aspectRatio: 597.8 / 608.2,
                 child: SvgPicture.string(svgSource, fit: BoxFit.contain),

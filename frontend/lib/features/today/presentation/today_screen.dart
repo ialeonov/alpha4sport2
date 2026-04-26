@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -9,6 +9,8 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../heatmap/data/muscle_heatmap_asset_loader.dart';
+import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -23,7 +25,9 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Map<String, dynamic>? _draftWorkout;
   _MotivationQuote? _motivationQuote;
+  _TodayFocus? _todayFocus;
   _TodaySummary _summary = const _TodaySummary.empty();
+  int _weeklyTargetFromProfile = _defaultWeeklyTarget;
   bool _draftLoading = true;
   bool _templatesLoading = false;
   bool _aiCoachLoading = false;
@@ -38,8 +42,109 @@ class _TodayScreenState extends State<TodayScreen> {
     await Future.wait([
       _loadDraft(),
       _loadMotivationQuote(),
-      _loadSummary(),
+      _loadFitnessProfile().then((_) => _loadSummary()),
+      _loadTodayFocus(),
     ]);
+  }
+
+  Future<void> _loadFitnessProfile() async {
+    try {
+      final data = await BackendApi.getFitnessProfile();
+      final days = data['daysPerWeek'];
+      if (days is int && days >= 1 && days <= 7 && mounted) {
+        setState(() => _weeklyTargetFromProfile = days);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadTodayFocus() async {
+    try {
+      final workouts = await _loadWorkoutsForAiCoach();
+      final exerciseCatalog = await _loadExerciseCatalogForAiCoach();
+      final assetData = await const MuscleHeatmapAssetLoader().load();
+      final now = DateTime.now();
+      final weekStart = DateUtils.dateOnly(
+        now.subtract(Duration(days: now.weekday - 1)),
+      );
+      final weekEnd = weekStart.add(const Duration(days: 7));
+      final thisWeek = workouts.where((workout) {
+        final startedAt =
+            DateTime.tryParse((workout['started_at'] ?? '').toString())
+                ?.toLocal();
+        return startedAt != null &&
+            !startedAt.isBefore(weekStart) &&
+            startedAt.isBefore(weekEnd);
+      }).toList();
+
+      final candidateMuscles = <String>{};
+      for (final exercise in exerciseCatalog) {
+        final primary = (exercise['primary_muscle'] ?? '').toString().trim();
+        if (primary.isNotEmpty && primary != 'кор') {
+          candidateMuscles.add(primary);
+        }
+      }
+
+      if (candidateMuscles.isEmpty || !mounted) {
+        return;
+      }
+
+      if (thisWeek.isEmpty) {
+        if (mounted) {
+          setState(() => _todayFocus = const _TodayFocus.generic());
+        }
+        return;
+      }
+
+      final calculator = const MuscleLoadCalculator();
+      final rawLoads = calculator.calculateForWorkouts(
+        workouts: thisWeek,
+        exerciseCatalog: exerciseCatalog,
+      );
+
+      final underloaded = candidateMuscles.toList()
+        ..sort((a, b) {
+          final byLoad = (rawLoads[a] ?? 0).compareTo(rawLoads[b] ?? 0);
+          if (byLoad != 0) return byLoad;
+          return _muscleLabel(assetData.zoneLabels, a)
+              .compareTo(_muscleLabel(assetData.zoneLabels, b));
+        });
+      final loaded = rawLoads.entries.where((entry) => entry.value > 0).toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      // Top-2 loaded muscles as "done" chips
+      final doneChips = loaded
+          .take(2)
+          .map((e) => _MuscleChip(
+                label: _muscleLabel(assetData.zoneLabels, e.key),
+                isDone: true,
+              ))
+          .toList();
+
+      // Top-3 underloaded muscles as "добрать" chips
+      final todoChips = underloaded
+          .take(3)
+          .map((m) => _MuscleChip(
+                label: _muscleLabel(assetData.zoneLabels, m),
+                isDone: false,
+              ))
+          .toList();
+
+      // Derive workout type from top underloaded muscle
+      final topMuscle = underloaded.isNotEmpty ? underloaded.first : null;
+      final (workoutType, emoji) = topMuscle != null
+          ? _muscleToWorkoutType(topMuscle)
+          : ('ТРЕНИРОВКА', '🏋️');
+
+      if (!mounted) return;
+
+      setState(() {
+        _todayFocus = _TodayFocus(
+          workoutType: workoutType,
+          emoji: emoji,
+          chips: [...doneChips, ...todoChips],
+        );
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadMotivationQuote() async {
@@ -106,7 +211,7 @@ class _TodayScreenState extends State<TodayScreen> {
     }
 
     final activeDays = activeDateSet.length;
-    final weeklyTarget = max(_defaultWeeklyTarget, thisWeek.length);
+    final weeklyTarget = max(_weeklyTargetFromProfile, thisWeek.length);
 
     if (!mounted) {
       return;
@@ -372,7 +477,8 @@ class _TodayScreenState extends State<TodayScreen> {
       return;
     }
 
-    final result = await showModalBottomSheet<({_AiCoachIntensity intensity, String notes})>(
+    final result = await showModalBottomSheet<
+        ({_AiCoachIntensity intensity, String notes})>(
       context: context,
       isScrollControlled: true,
       builder: (context) {
@@ -400,8 +506,7 @@ class _TodayScreenState extends State<TodayScreen> {
                   Text(
                     'AI-коуч соберёт программу на основе истории тренировок.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                   ),
                   const SizedBox(height: 12),
@@ -427,16 +532,16 @@ class _TodayScreenState extends State<TodayScreen> {
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       labelText: 'Пожелания к тренировке',
-                      hintText: 'Например: хочу больше ног, устал — сделай легче...',
+                      hintText:
+                          'Например: хочу больше ног, устал — сделай легче...',
                       border: const OutlineInputBorder(),
                       isDense: true,
                       counterStyle: Theme.of(context)
                           .textTheme
                           .bodySmall
                           ?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                     ),
                   ),
@@ -528,72 +633,6 @@ class _TodayScreenState extends State<TodayScreen> {
           .toList();
     }
     return BackendApi.getExercises();
-  }
-
-  String _buildAiCoachWorkoutPrompt(
-    _AiCoachIntensity intensity,
-    List<Map<String, dynamic>> workouts,
-  ) {
-    final recentWorkoutSummary = _buildRecentWorkoutSummary(workouts);
-    return [
-      'ОБЯЗАТЕЛЬНО учитывай последние тренировки, недавнюю нагрузку и восстановление.',
-      'Не повторяй один в один упражнения и структуру последней и предпоследней тренировки, если только это не необходимо по логике программы.',
-      'Если какая-то группа мышц или движение были сильно нагружены в последних 1-2 тренировках, снизь повторение этой нагрузки или смести акцент.',
-      if (recentWorkoutSummary.isNotEmpty)
-        'Последние тренировки: $recentWorkoutSummary.',
-      'Составь тренировку от AI-коуча на сегодня.',
-      'Используй историю моих прошлых тренировок и доступные мне упражнения.',
-      'Интенсивность: ${intensity.title}.',
-      'Нужно ${intensity.rangeLabel} упражнений.',
-      'Верни только JSON без markdown и без пояснений вне JSON.',
-      'Для тяжёлых базовых упражнений добавляй подводящие подходы в отдельном поле warmup_sets.',
-      'Формат ответа:',
-      '{"name":"Название тренировки","exercises":[{"exercise_name":"Жим лёжа","sets":4,"reps":"6-8","notes":"короткая подсказка","warmup_sets":[{"reps":"10","notes":"лёгкий разминочный"},{"reps":"6","notes":"подводящий"},{"reps":"3","notes":"выход на рабочий вес"}]}]}',
-      'Поле name обязательно.',
-      'В exercises должно быть только ${intensity.minExercises}-${intensity.maxExercises} упражнений.',
-      'exercise_name должен быть строкой.',
-      'sets должен быть целым числом от 1 до 6.',
-      'reps должен быть строкой, например "6-8", "8-10" или "12".',
-      'warmup_sets можно добавлять только там, где они реально нужны.',
-      'В warmup_sets не указывай рабочие подходы, только подводящие.',
-      'notes можно оставить пустым.',
-    ].join(' ');
-  }
-
-  String _buildRecentWorkoutSummary(List<Map<String, dynamic>> workouts) {
-    if (workouts.isEmpty) {
-      return '';
-    }
-
-    final sorted = [...workouts]..sort((a, b) {
-        final aDate = DateTime.tryParse((a['started_at'] ?? '').toString()) ??
-            DateTime(1970);
-        final bDate = DateTime.tryParse((b['started_at'] ?? '').toString()) ??
-            DateTime(1970);
-        return bDate.compareTo(aDate);
-      });
-
-    final recent = sorted.take(3).map((workout) {
-      final startedAt =
-          DateTime.tryParse((workout['started_at'] ?? '').toString())
-              ?.toLocal();
-      final name = (workout['name'] ?? 'Тренировка').toString().trim();
-      final exerciseNames =
-          ((workout['exercises'] as List?)?.cast<dynamic>() ?? const [])
-              .whereType<Map>()
-              .map((item) => (item['exercise_name'] ?? '').toString().trim())
-              .where((name) => name.isNotEmpty)
-              .take(6)
-              .toList();
-      final dateLabel = startedAt == null
-          ? ''
-          : '${startedAt.day.toString().padLeft(2, '0')}.${startedAt.month.toString().padLeft(2, '0')}';
-      final exercisesLabel =
-          exerciseNames.isEmpty ? 'без упражнений' : exerciseNames.join(', ');
-      return '$dateLabel $name: $exercisesLabel';
-    }).toList();
-
-    return recent.join(' | ');
   }
 
   _AiCoachWorkoutPlan _decodeAiCoachWorkoutPlan(String rawReply) {
@@ -800,46 +839,134 @@ class _TodayScreenState extends State<TodayScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final showQuote =
+        _motivationQuote != null && !_draftLoading && _draftWorkout == null;
+    final height = MediaQuery.sizeOf(context).height;
+    final isTall = height >= 760;
     return AppBackdrop(
       child: RefreshIndicator(
         onRefresh: _refreshScreen,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
-          children: [
-            _WeekSummaryCard(summary: _summary),
-            const SizedBox(height: 14),
-            _PrimaryWorkoutCard(
-              templatesLoading: _templatesLoading,
-              aiCoachLoading: _aiCoachLoading,
-              onStartWorkout: () => _openWorkout(date: DateTime.now()),
-              onStartTemplate: _startFromTemplate,
-              onStartAiCoach: _startFromAiCoach,
-            ),
-            const SizedBox(height: 12),
-            if (_draftLoading)
-              const DashboardCard(
-                child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Center(child: CircularProgressIndicator()),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final verticalPadding = EdgeInsets.fromLTRB(
+              16,
+              isTall ? 18 : 12,
+              16,
+              isTall ? 48 : 96,
+            );
+            final minContentHeight = max(
+              0.0,
+              constraints.maxHeight -
+                  verticalPadding.top -
+                  verticalPadding.bottom,
+            );
+
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: verticalPadding,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: minContentHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ScreenHeader(
+                        title: 'Сегодня ${_todayDateLabel(today)}',
+                      ),
+                      SizedBox(height: isTall ? 20 : 12),
+                      _WorkoutDayCard(
+                        focus: _todayFocus,
+                        templatesLoading: _templatesLoading,
+                        aiCoachLoading: _aiCoachLoading,
+                        onStartWorkout: () =>
+                            _openWorkout(date: DateTime.now()),
+                        onStartTemplate: _startFromTemplate,
+                        onStartAiCoach: _startFromAiCoach,
+                      ),
+                      const SizedBox(height: 10),
+                      _WeekSummaryCard(summary: _summary),
+                      const SizedBox(height: 10),
+                      if (_draftLoading)
+                        const DashboardCard(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        )
+                      else if (_draftWorkout != null)
+                        _DraftCard(
+                          draftWorkout: _draftWorkout!,
+                          onOpenDraft: () =>
+                              _openWorkout(workout: _draftWorkout),
+                          onDelete: _deleteDraft,
+                        ),
+                      if (showQuote) const Spacer(flex: 2) else const Spacer(),
+                      if (showQuote) ...[
+                        _TodayQuote(
+                          quote: _motivationQuote!.quote,
+                          author: _motivationQuote!.author,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              )
-            else if (_draftWorkout != null)
-              _DraftCard(
-                draftWorkout: _draftWorkout!,
-                onOpenDraft: () => _openWorkout(workout: _draftWorkout),
-                onDelete: _deleteDraft,
               ),
-            if (_motivationQuote != null) ...[
-              const SizedBox(height: 28),
-              _TodayQuote(
-                quote: _motivationQuote!.quote,
-                author: _motivationQuote!.author,
-              ),
-            ],
-          ],
+            );
+          },
         ),
       ),
     );
+  }
+
+  static String _todayDateLabel(DateTime date) {
+    const months = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    return '${date.day} ${months[date.month - 1]}';
+  }
+
+  static String _muscleLabel(Map<String, String> labels, String muscle) {
+    final label = labels[muscle];
+    if (label != null && label.isNotEmpty) {
+      return label.toLowerCase();
+    }
+    return muscle.toLowerCase();
+  }
+
+  static (String, String) _muscleToWorkoutType(String muscle) {
+    const map = <String, (String, String)>{
+      'квадрицепс': ('НОГИ', '🦵'),
+      'бицепс бедра': ('НОГИ', '🦵'),
+      'ягодицы': ('НОГИ', '🦵'),
+      'икры': ('НОГИ', '🦵'),
+      'грудь': ('ГРУДЬ', '💪'),
+      'передние дельты': ('ГРУДЬ И ПЛЕЧИ', '💪'),
+      'плечи': ('ПЛЕЧИ', '🏋️'),
+      'трицепс': ('РУКИ', '💪'),
+      'бицепс': ('РУКИ', '💪'),
+      'широчайшие': ('СПИНА', '🏋️'),
+      'трапеция': ('СПИНА', '🏋️'),
+      'ромбовидные': ('СПИНА', '🏋️'),
+      'задние дельты': ('СПИНА', '🏋️'),
+      'пресс': ('КОР', '🎯'),
+    };
+    final lower = muscle.toLowerCase();
+    for (final entry in map.entries) {
+      if (lower.contains(entry.key)) return entry.value;
+    }
+    return ('ТРЕНИРОВКА', '🏋️');
   }
 }
 
@@ -853,137 +980,180 @@ class _WeekSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final today = DateTime.now().weekday; // 1=Mon
+    final today = DateTime.now().weekday;
+    final done = summary.weekCount;
+    final target = summary.weeklyTarget;
+    final remaining = max(0, target - done);
+    final progress = target > 0 ? (done / target).clamp(0.0, 1.0) : 0.0;
+    final isComplete = done >= target;
+    final ringColor = isComplete ? scheme.tertiary : scheme.secondary;
 
     return DashboardCard(
+      padding: const EdgeInsets.all(14),
       color: Color.alphaBlend(
-        scheme.secondary.withValues(alpha: 0.08),
+        scheme.secondary.withValues(alpha: 0.06),
         scheme.surfaceContainerLow,
       ),
       borderColor: scheme.outlineVariant.withValues(alpha: 0.18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          // ── Круговой индикатор ──────────────────────
+          SizedBox(
+            width: 54,
+            height: 54,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 4.5,
+                  backgroundColor:
+                      scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                  color: ringColor,
+                  strokeCap: StrokeCap.round,
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Эта неделя',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
+                      '$done',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            height: 1.0,
+                            color: ringColor,
                           ),
                     ),
-                    const SizedBox(height: 4),
+                    Container(
+                        height: 1,
+                        width: 18,
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.4)),
                     Text(
-                      _workoutCountLabel(summary.weekCount),
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                height: 1.05,
-                                color: _workoutCountColor(summary.weekCount,
-                                    summary.weeklyTarget, scheme),
-                              ),
-                    ),
-                  ],
-                ),
-              ),
-              StatusBadge(
-                label: '🔥 ${summary.activeDays}',
-                color: summary.weekCount >= summary.weeklyTarget
-                    ? scheme.tertiary
-                    : scheme.primary,
-                compact: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: List.generate(7, (index) {
-              final weekday = index + 1;
-              final isActive = summary.activeWeekdays.contains(weekday);
-              final isToday = weekday == today;
-              final isPast = weekday < today;
-
-              return Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      _dayLabels[index],
+                      '$target',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: isToday
-                                ? scheme.secondary
-                                : scheme.onSurfaceVariant
-                                    .withValues(alpha: 0.6),
-                            fontWeight:
-                                isToday ? FontWeight.w800 : FontWeight.w600,
+                            color: scheme.onSurfaceVariant,
+                            height: 1.2,
                           ),
-                    ),
-                    const SizedBox(height: 8),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: isActive ? 32 : 28,
-                      height: isActive ? 32 : 28,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isActive
-                            ? scheme.secondary
-                            : isToday
-                                ? scheme.secondary.withValues(alpha: 0.15)
-                                : isPast
-                                    ? scheme.surfaceContainerHighest
-                                        .withValues(alpha: 0.4)
-                                    : Colors.transparent,
-                        border: isToday && !isActive
-                            ? Border.all(
-                                color: scheme.secondary.withValues(alpha: 0.5),
-                                width: 1.5,
-                              )
-                            : null,
-                      ),
-                      child: Center(
-                        child: isActive
-                            ? Icon(
-                                Icons.check_rounded,
-                                size: 16,
-                                color: scheme.onSecondary,
-                              )
-                            : null,
-                      ),
                     ),
                   ],
                 ),
-              );
-            }),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+
+          // ── Текст + дни ─────────────────────────────
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$done из $target тренировок',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                if (remaining > 0) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _remainingLabel(remaining, today),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Цель недели выполнена 🎉',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.tertiary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Row(
+                  children: List.generate(7, (index) {
+                    final weekday = index + 1;
+                    final isActive = summary.activeWeekdays.contains(weekday);
+                    final isToday = weekday == today;
+                    final isPast = weekday < today;
+
+                    return Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            _dayLabels[index],
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  fontSize: 10,
+                                  color: isToday
+                                      ? scheme.secondary
+                                      : scheme.onSurfaceVariant
+                                          .withValues(alpha: 0.6),
+                                  fontWeight: isToday
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
+                          ),
+                          const SizedBox(height: 5),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            width: isActive ? 24 : 20,
+                            height: isActive ? 24 : 20,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isActive
+                                  ? scheme.secondary
+                                  : isToday
+                                      ? scheme.secondary.withValues(alpha: 0.15)
+                                      : isPast
+                                          ? scheme.surfaceContainerHighest
+                                              .withValues(alpha: 0.4)
+                                          : Colors.transparent,
+                              border: isToday && !isActive
+                                  ? Border.all(
+                                      color: scheme.secondary
+                                          .withValues(alpha: 0.5),
+                                      width: 1.5,
+                                    )
+                                  : null,
+                            ),
+                            child: isActive
+                                ? Icon(Icons.check_rounded,
+                                    size: 13, color: scheme.onSecondary)
+                                : null,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  static String _workoutCountLabel(int count) {
-    if (count % 10 == 1 && count % 100 != 11) return '$count тренировка';
-    if (count % 10 >= 2 &&
-        count % 10 <= 4 &&
-        (count % 100 < 10 || count % 100 >= 20)) {
-      return '$count тренировки';
+  static String _remainingLabel(int remaining, int todayWeekday) {
+    if (remaining == 1 && todayWeekday >= 5) return 'Осталась одна – сегодня!';
+    if (remaining == 1) return 'Осталась одна тренировка';
+    if (remaining % 10 >= 2 &&
+        remaining % 10 <= 4 &&
+        (remaining % 100 < 10 || remaining % 100 >= 20)) {
+      return 'Осталось $remaining тренировки';
     }
-    return '$count тренировок';
-  }
-
-  static Color _workoutCountColor(int count, int target, ColorScheme scheme) {
-    if (count == 0) return scheme.onSurfaceVariant;
-    if (count >= target) return scheme.tertiary;
-    return scheme.primary;
+    return 'Осталось $remaining тренировок';
   }
 }
 
-class _PrimaryWorkoutCard extends StatelessWidget {
-  const _PrimaryWorkoutCard({
+class _WorkoutDayCard extends StatelessWidget {
+  const _WorkoutDayCard({
+    required this.focus,
     required this.templatesLoading,
     required this.aiCoachLoading,
     required this.onStartWorkout,
@@ -991,6 +1161,7 @@ class _PrimaryWorkoutCard extends StatelessWidget {
     required this.onStartAiCoach,
   });
 
+  final _TodayFocus? focus;
   final bool templatesLoading;
   final bool aiCoachLoading;
   final VoidCallback onStartWorkout;
@@ -1000,10 +1171,7 @@ class _PrimaryWorkoutCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isWide = screenWidth >= 720;
-    final isCompact = screenWidth < 420;
-    final useStackedActions = screenWidth < 520;
+    final hasFocus = focus != null && focus!.workoutType != 'СТАРТ';
 
     return DashboardCard(
       color: Color.alphaBlend(
@@ -1011,190 +1179,124 @@ class _PrimaryWorkoutCard extends StatelessWidget {
         scheme.surfaceContainerLow,
       ),
       borderColor: scheme.secondary.withValues(alpha: 0.18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: scheme.secondary.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(18),
+          // ── Фокус ─────────────────────────────────────
+          if (focus != null) ...[
+            Text(
+              'ТРЕНИРОВКА ДНЯ',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.4,
+                  ),
             ),
-            child: Icon(Icons.add, color: scheme.secondary, size: 28),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '\u041d\u043e\u0432\u0430\u044f \u0442\u0440\u0435\u043d\u0438\u0440\u043e\u0432\u043a\u0430',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '\u0411\u044b\u0441\u0442\u0440\u044b\u0439 \u0441\u0442\u0430\u0440\u0442 \u0432\u0440\u0443\u0447\u043d\u0443\u044e, \u043f\u043e \u0448\u0430\u0431\u043b\u043e\u043d\u0443 \u0438\u043b\u0438 \u043e\u0442 AI-\u043a\u043e\u0443\u0447\u0430.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                ),
-                const SizedBox(height: 14),
-                isWide
-                    ? Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          FilledButton(
-                            onPressed: onStartWorkout,
-                            child: const Text(
-                              '\u041d\u0430\u0447\u0430\u0442\u044c \u0442\u0440\u0435\u043d\u0438\u0440\u043e\u0432\u043a\u0443',
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed:
-                                templatesLoading ? null : onStartTemplate,
-                            icon: templatesLoading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.library_books_outlined),
-                            label: const Text(
-                              '\u0418\u0437 \u0448\u0430\u0431\u043b\u043e\u043d\u0430',
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: aiCoachLoading ? null : onStartAiCoach,
-                            icon: aiCoachLoading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.auto_awesome_outlined),
-                            label: const Text('От AI-коуча'),
-                          ),
-                        ],
-                      )
-                    : useStackedActions
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              FilledButton(
-                                onPressed: onStartWorkout,
-                                child: const Text(
-                                  '\u041d\u0430\u0447\u0430\u0442\u044c \u0442\u0440\u0435\u043d\u0438\u0440\u043e\u0432\u043a\u0443',
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed:
-                                    templatesLoading ? null : onStartTemplate,
-                                icon: templatesLoading
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.library_books_outlined),
-                                label: const Text(
-                                  '\u0418\u0437 \u0448\u0430\u0431\u043b\u043e\u043d\u0430',
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed:
-                                    aiCoachLoading ? null : onStartAiCoach,
-                                icon: aiCoachLoading
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.auto_awesome_outlined,
-                                      ),
-                                label: const Text('От AI-коуча'),
-                              ),
-                            ],
-                          )
-                        : Row(
-                            children: [
-                              Expanded(
-                                flex: isCompact ? 6 : 5,
-                                child: FilledButton(
-                                  onPressed: onStartWorkout,
-                                  child: const Text(
-                                    '\u041d\u0430\u0447\u0430\u0442\u044c \u0442\u0440\u0435\u043d\u0438\u0440\u043e\u0432\u043a\u0443',
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                flex: isCompact ? 5 : 3,
-                                child: OutlinedButton.icon(
-                                  onPressed:
-                                      templatesLoading ? null : onStartTemplate,
-                                  icon: templatesLoading
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.library_books_outlined),
-                                  label: const Text(
-                                    '\u0418\u0437 \u0448\u0430\u0431\u043b\u043e\u043d\u0430',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                flex: isCompact ? 5 : 4,
-                                child: OutlinedButton.icon(
-                                  onPressed:
-                                      aiCoachLoading ? null : onStartAiCoach,
-                                  icon: aiCoachLoading
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.auto_awesome_outlined,
-                                        ),
-                                  label: const Text(
-                                    'От AI-коуча',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-              ],
+            const SizedBox(height: 4),
+            Text(
+              '${focus!.workoutType} ${focus!.emoji}',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    height: 1.1,
+                  ),
             ),
+            const SizedBox(height: 14),
+          ] else ...[
+            const SizedBox(height: 4),
+          ],
+
+          // ── Кнопки ────────────────────────────────────
+          if (!hasFocus) ...[
+            Text(
+              'Новая тренировка',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: onStartWorkout,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFD4A017),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                  child: const Text('Начать тренировку'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _IconActionButton(
+                icon: templatesLoading
+                    ? null
+                    : Icons.library_books_outlined,
+                loading: templatesLoading,
+                tooltip: 'Шаблон',
+                onTap: templatesLoading ? null : onStartTemplate,
+              ),
+              const SizedBox(width: 6),
+              _IconActionButton(
+                icon: aiCoachLoading ? null : Icons.auto_awesome_outlined,
+                loading: aiCoachLoading,
+                tooltip: 'AI-план',
+                onTap: aiCoachLoading ? null : onStartAiCoach,
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _IconActionButton extends StatelessWidget {
+  const _IconActionButton({
+    required this.tooltip,
+    required this.onTap,
+    this.icon,
+    this.loading = false,
+  });
+
+  final IconData? icon;
+  final bool loading;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.5)),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Center(
+            child: loading
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: scheme.secondary),
+                  )
+                : Icon(icon, size: 20, color: scheme.secondary),
+          ),
+        ),
       ),
     );
   }
@@ -1509,9 +1611,13 @@ class _MotivationQuote {
     }
 
     return _MotivationQuote(
-      quote: line.substring(0, separator).trim(),
+      quote: _trimQuoteEnding(line.substring(0, separator).trim()),
       author: line.substring(separator + 3).trim(),
     );
+  }
+
+  static String _trimQuoteEnding(String value) {
+    return value.replaceFirst(RegExp(r'[\s.…。]+$'), '');
   }
 }
 
@@ -1535,6 +1641,30 @@ class _TodaySummary {
   final Set<int> activeWeekdays; // 1=Mon .. 7=Sun
 }
 
+class _MuscleChip {
+  const _MuscleChip({required this.label, required this.isDone});
+  final String label;
+  final bool isDone; // true = уже нагружена, false = добрать
+}
+
+class _TodayFocus {
+  const _TodayFocus({
+    required this.workoutType,
+    required this.emoji,
+    required this.chips,
+  });
+
+  const _TodayFocus.generic()
+      : workoutType = 'СТАРТ',
+        emoji = '🏋️',
+        chips = const [];
+
+  final String workoutType;
+  final String emoji;
+  final List<_MuscleChip> chips;
+}
+
+
 class _TodayQuote extends StatelessWidget {
   const _TodayQuote({
     required this.quote,
@@ -1548,6 +1678,7 @@ class _TodayQuote extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final isNarrow = MediaQuery.sizeOf(context).width < 380;
 
     return IntrinsicHeight(
       child: Row(
@@ -1559,20 +1690,22 @@ class _TodayQuote extends StatelessWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     '«$quote»',
-                    style: textTheme.titleMedium?.copyWith(
+                    style:
+                        (isNarrow ? textTheme.bodyMedium : textTheme.bodyLarge)
+                            ?.copyWith(
                       fontWeight: FontWeight.w700,
                       fontStyle: FontStyle.italic,
-                      height: 1.45,
+                      height: 1.28,
                       color: scheme.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
                     '— $author',
                     style: textTheme.bodyMedium?.copyWith(

@@ -229,13 +229,6 @@ class _BodyScreenState extends State<BodyScreen> {
     }
   }
 
-  String _metricLabel(String title, dynamic value) {
-    if (value == null) {
-      return '$title: —';
-    }
-    return '$title: $value';
-  }
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
