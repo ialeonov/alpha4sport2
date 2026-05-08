@@ -57,4 +57,5 @@ class CacheKeys {
   static const weeklyVolumeCache = 'weekly_volume_cache';
   static const activeWorkoutDraft = 'active_workout_draft';
   static const customPrograms = 'custom_programs';
+  static const offlineMutations = 'offline_mutations';
 }

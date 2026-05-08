@@ -1,7 +1,8 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
-import 'dart:html' as html;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
+import 'download_helper_stub.dart'
+    if (dart.library.html) 'download_helper_web.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -136,14 +137,8 @@ class WorkoutShareService {
 
   // ── Browser download ─────────────────────────────────────────────────
 
-  static void downloadPng(Uint8List bytes, String filename) {
-    final blob = html.Blob([bytes], 'image/png');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute('download', filename)
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
+  static Future<void> downloadPng(Uint8List bytes, String filename) =>
+      platformSavePng(bytes, filename);
 }
 
 // ── Bottom sheet ─────────────────────────────────────────────────────────────

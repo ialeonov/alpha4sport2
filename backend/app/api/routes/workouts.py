@@ -52,6 +52,7 @@ def _hydrate_exercises(workout: Workout, payload_exercises: list, db: Session, u
                 position=set_data.position,
                 reps=set_data.reps,
                 weight=set_data.weight,
+                set_type=(set_data.set_type or 'work'),
                 rpe=set_data.rpe,
                 notes=set_data.notes,
             )
@@ -135,6 +136,7 @@ def start_from_template(
                         position=i + 1,
                         reps=0,
                         weight=tpl_exercise.target_weight,
+                        set_type='work',
                         rpe=None,
                         notes=None,
                     )
@@ -174,6 +176,7 @@ def previous_exercise_values(
         .where(
             Workout.user_id == current_user.id,
             _normalized_exercise_name_expr() == normalized_name,
+            ExerciseSet.set_type != 'warmup',
         )
         .order_by(Workout.started_at.desc(), ExerciseSet.position.desc())
         .limit(limit)

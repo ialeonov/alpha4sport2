@@ -3,13 +3,19 @@ import 'dart:math' show log;
 import 'muscle_heatmap_models.dart';
 import 'muscle_load_normalizer.dart';
 
+const String _coreMuscle = 'кор';
+const Set<String> _coreMuscleAliases = {
+  'разгибатель_спины',
+  'поясница',
+};
+
 class MuscleLoadCalculator {
   const MuscleLoadCalculator({
     this.baseSetScore = 1.0,
     this.primaryMuscleFactor = 1.0,
     this.secondaryMuscleFactor = 0.4,
     this.stabilizerFactor = 0.15,
-    this.stabilizerMuscles = const {'кор'},
+    this.stabilizerMuscles = const {_coreMuscle},
     this.normalizer = const MuscleLoadNormalizer(),
   });
 
@@ -78,10 +84,12 @@ class MuscleLoadCalculator {
         }
 
         final primaryMuscle =
-            (catalogEntry['primary_muscle'] ?? '').toString().trim();
-        final secondaryMuscles =
-            (catalogEntry['secondary_muscles'] as List?)?.cast<dynamic>() ??
-                const [];
+            _canonicalizeMuscleKey(catalogEntry['primary_muscle']);
+        final secondaryMuscles = _canonicalizeSecondaryMuscles(
+          primaryMuscle,
+          (catalogEntry['secondary_muscles'] as List?)?.cast<dynamic>() ??
+              const [],
+        );
         final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
 
         for (final rawSet in sets) {
@@ -105,7 +113,7 @@ class MuscleLoadCalculator {
           }
 
           for (final rawMuscle in secondaryMuscles) {
-            final muscle = rawMuscle.toString().trim();
+            final muscle = _canonicalizeMuscleKey(rawMuscle);
             if (muscle.isEmpty) {
               continue;
             }
@@ -228,9 +236,8 @@ class MuscleLoadCalculator {
     final weight = _toDouble(set['weight']);
     // Absolute log scale so score never decreases when a new heavy set is added.
     // 100 kg → 1.0, 50 kg → 0.85, 20 kg → 0.65, 10 kg → 0.52, bodyweight → 1.0.
-    final weightFactor = weight > 0
-        ? (log(weight + 1) / log(101)).clamp(0.2, 1.0)
-        : 1.0;
+    final weightFactor =
+        weight > 0 ? (log(weight + 1) / log(101)).clamp(0.2, 1.0) : 1.0;
     return baseSetScore * _repFactor(reps) * weightFactor;
   }
 
@@ -287,6 +294,28 @@ class MuscleLoadCalculator {
 
 String _normalizeExerciseLookupName(String value) {
   return value.trim().toLowerCase().replaceAll('ё', 'е');
+}
+
+String _canonicalizeMuscleKey(dynamic value) {
+  final muscle = value?.toString().trim() ?? '';
+  return _coreMuscleAliases.contains(muscle) ? _coreMuscle : muscle;
+}
+
+List<String> _canonicalizeSecondaryMuscles(
+  String primaryMuscle,
+  List<dynamic> rawMuscles,
+) {
+  final seen = <String>{};
+  final muscles = <String>[];
+  for (final rawMuscle in rawMuscles) {
+    final muscle = _canonicalizeMuscleKey(rawMuscle);
+    if (muscle.isEmpty || muscle == primaryMuscle || seen.contains(muscle)) {
+      continue;
+    }
+    seen.add(muscle);
+    muscles.add(muscle);
+  }
+  return muscles;
 }
 
 String formatMuscleLabel(String value) => _formatMuscleLabel(value);

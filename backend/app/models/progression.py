@@ -68,6 +68,8 @@ class ProgressExerciseRecord(Base):
     best_weight: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     best_1rm: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     best_volume: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    best_reps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    best_reps_weight: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

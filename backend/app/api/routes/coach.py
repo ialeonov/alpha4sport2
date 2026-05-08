@@ -1,10 +1,20 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_owner_user
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.coach import CoachChatRequest, CoachChatResponse, CoachHistoryResponse
+from app.schemas.coach import (
+    CoachChatRequest,
+    CoachChatResponse,
+    CoachHistoryResponse,
+    CoachWorkoutGenerateRequest,
+    CoachWorkoutGenerateResponse,
+    OwnerCoachHistoryResponse,
+)
 from app.services.coach_service import CoachService, CoachServiceError
 
 router = APIRouter()
@@ -30,6 +40,29 @@ async def coach_history(
     }
 
 
+@router.get('/owner/history', response_model=OwnerCoachHistoryResponse)
+async def owner_coach_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_owner_user),
+):
+    service = CoachService(db)
+    messages = service.list_all_history()
+    return {
+        'messages': [
+            {
+                'id': item['id'],
+                'user_id': item['user_id'],
+                'user_email': item['user_email'],
+                'user_display_name': item['user_display_name'],
+                'role': item['role'],
+                'content': item['content'],
+                'created_at': item['created_at'].isoformat(),
+            }
+            for item in messages
+        ]
+    }
+
+
 @router.delete('/history', status_code=status.HTTP_204_NO_CONTENT)
 async def clear_coach_history(
     db: Session = Depends(get_db),
@@ -49,7 +82,10 @@ async def delete_coach_history_message(
     service = CoachService(db)
     deleted = service.delete_message(user_id=current_user.id, message_id=message_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Сообщение не найдено.')
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Сообщение не найдено.',
+        )
     return None
 
 
@@ -64,18 +100,94 @@ async def coach_chat(
         result = await service.reply(
             user=current_user,
             messages=[message.model_dump() for message in payload.messages],
+            wellness_entries=[e.model_dump() for e in payload.wellness_entries]
+            if payload.wellness_entries
+            else None,
         )
         latest_user_message = next(
             (message.content for message in reversed(payload.messages) if message.role == 'user'),
             None,
         )
-        if latest_user_message:
+        if payload.save_history and latest_user_message:
             service.save_exchange(
                 user_id=current_user.id,
                 user_text=latest_user_message,
                 assistant_text=result['reply'],
             )
         return result
+    except CoachServiceError as exc:
+        error_text = str(exc)
+        status_code = status.HTTP_502_BAD_GATEWAY
+        if 'не настроен' in error_text.lower():
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        raise HTTPException(status_code=status_code, detail=error_text) from exc
+
+
+@router.post('/chat/stream')
+async def coach_chat_stream(
+    payload: CoachChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    latest_user_message = next(
+        (m.content for m in reversed(payload.messages) if m.role == 'user'),
+        None,
+    )
+    messages = [m.model_dump() for m in payload.messages]
+    wellness_entries = [e.model_dump() for e in payload.wellness_entries] if payload.wellness_entries else None
+
+    async def generate():
+        full_reply = ''
+        try:
+            async for chunk in service.reply_stream(
+                user=current_user,
+                messages=messages,
+                wellness_entries=wellness_entries,
+            ):
+                full_reply += chunk
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+        except CoachServiceError as exc:
+            yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
+            return
+
+        if payload.save_history and latest_user_message and full_reply:
+            service.save_exchange(
+                user_id=current_user.id,
+                user_text=latest_user_message,
+                assistant_text=full_reply,
+            )
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        },
+    )
+
+
+@router.post('/generate-workout', response_model=CoachWorkoutGenerateResponse)
+async def generate_coach_workout(
+    payload: CoachWorkoutGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    try:
+        return await service.generate_workout(
+            user=current_user,
+            intensity_title=payload.intensity_title,
+            min_exercises=payload.min_exercises,
+            max_exercises=payload.max_exercises,
+            user_notes=payload.user_notes,
+            wellness_entries=[e.model_dump() for e in payload.wellness_entries]
+            if payload.wellness_entries
+            else None,
+        )
     except CoachServiceError as exc:
         error_text = str(exc)
         status_code = status.HTTP_502_BAD_GATEWAY

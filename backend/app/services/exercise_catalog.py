@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.workout import ExerciseCatalog, ExerciseSecondaryMuscle
 
-CATALOG_JSON_PATH = Path(__file__).resolve().parents[2] / 'docs' / 'fit_catalog.json'
+_CATALOG_JSON_CANDIDATES = (
+    Path(__file__).resolve().parents[2] / 'docs' / 'fit_catalog.json',
+    Path(__file__).resolve().parents[3] / 'docs' / 'fit_catalog.json',
+)
+CATALOG_JSON_PATH = next(
+    (path for path in _CATALOG_JSON_CANDIDATES if path.exists()),
+    _CATALOG_JSON_CANDIDATES[0],
+)
 
 _CYRILLIC_TO_LATIN = str.maketrans(
     {
@@ -47,6 +54,11 @@ _CYRILLIC_TO_LATIN = str.maketrans(
     }
 )
 _SLUG_SANITIZER = re.compile(r'[^a-z0-9]+')
+CORE_MUSCLE = 'кор'
+_MUSCLE_ALIASES = {
+    'разгибатель_спины': CORE_MUSCLE,
+    'поясница': CORE_MUSCLE,
+}
 
 
 def list_catalog_exercises_stmt(user_id: int) -> Select[tuple[ExerciseCatalog]]:
@@ -64,15 +76,20 @@ def normalize_slug(value: str) -> str:
     return normalized or 'exercise'
 
 
+def canonicalize_muscle(value: str) -> str:
+    muscle = value.strip()
+    return _MUSCLE_ALIASES.get(muscle, muscle)
+
+
 def validate_muscles(primary_muscle: str, secondary_muscles: list[str]) -> list[str]:
-    primary = primary_muscle.strip()
+    primary = canonicalize_muscle(primary_muscle)
     if not primary:
         raise ValueError('Primary muscle is required')
 
     cleaned: list[str] = []
     seen: set[str] = set()
     for value in secondary_muscles:
-        muscle = value.strip()
+        muscle = canonicalize_muscle(value)
         if not muscle or muscle == primary or muscle in seen:
             continue
         seen.add(muscle)
@@ -115,7 +132,7 @@ def load_seed_catalog() -> list[dict[str, object]]:
 
         name = str(raw_exercise.get('name', '')).strip()
         slug = str(raw_exercise.get('slug', '')).strip()
-        primary_muscle = str(raw_exercise.get('primary_muscle', '')).strip()
+        primary_muscle = canonicalize_muscle(str(raw_exercise.get('primary_muscle', '')))
         secondary_values = [str(value).strip() for value in raw_exercise.get('secondary_muscles', [])]
 
         if not name or not slug:
@@ -194,11 +211,12 @@ def ensure_seed_catalog(db: Session, user_id: int) -> int:
 
 
 def serialize_exercise_catalog(exercise: ExerciseCatalog) -> dict[str, object]:
-    secondary = [link.muscle for link in exercise.secondary_muscle_links]
+    primary = canonicalize_muscle(exercise.primary_muscle)
+    secondary = validate_muscles(primary, [link.muscle for link in exercise.secondary_muscle_links])
     return {
         'id': exercise.id,
         'name': exercise.name,
         'slug': exercise.slug,
-        'primary_muscle': exercise.primary_muscle,
+        'primary_muscle': primary,
         'secondary_muscles': secondary,
     }

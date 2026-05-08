@@ -214,18 +214,6 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
       _syncExercisesWithCatalog(markChanged: false);
       _loadLastSets();
     } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
-      if (cached != null && mounted) {
-        setState(() {
-          _catalog =
-              cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
-          _catalogLoading = false;
-        });
-        _syncExercisesWithCatalog(markChanged: false);
-        _loadLastSets();
-        return;
-      }
-
       if (!mounted) {
         return;
       }
@@ -274,15 +262,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     if (_workoutHistory.isEmpty) {
       try {
         _workoutHistory = await BackendApi.getWorkouts();
-      } catch (_) {
-        final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
-        if (cached != null) {
-          _workoutHistory = cached
-              .cast<Map>()
-              .map((entry) => entry.cast<String, dynamic>())
-              .toList();
-        }
-      }
+      } catch (_) {}
     }
   }
 
@@ -1372,6 +1352,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                     ),
                     child: DashboardCard(
                       leftAccentColor: accent,
+                      onTap: exercise.isCollapsed &&
+                              exercise.nameController.text.trim().isNotEmpty
+                          ? () =>
+                              setState(() => exercise.isCollapsed = false)
+                          : null,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1400,7 +1385,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                               Expanded(
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(14),
-                                  onTap: () => _pickExercise(exerciseIndex),
+                                  onTap: exercise.isCollapsed
+                                      ? () => setState(
+                                            () => exercise.isCollapsed = false,
+                                          )
+                                      : () => _pickExercise(exerciseIndex),
                                   child: exercise.nameController.text
                                           .trim()
                                           .isEmpty
@@ -1443,15 +1432,72 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                             ],
                                           ),
                                         )
-                                      : Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              vertical: 4),
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
+                                      : exercise.isCollapsed
+                                          ? Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 6),
+                                              child: Wrap(
+                                                crossAxisAlignment:
+                                                    WrapCrossAlignment.center,
+                                                spacing: 8,
+                                                runSpacing: 2,
+                                                children: [
+                                                  Text(
+                                                    exercise
+                                                        .nameController.text
+                                                        .trim(),
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .titleMedium
+                                                        ?.copyWith(
+                                                          fontWeight:
+                                                              FontWeight.w800,
+                                                        ),
+                                                  ),
+                                                  Text.rich(
+                                                    TextSpan(
+                                                      children: [
+                                                        TextSpan(
+                                                          text:
+                                                              '${exercise.sets.length}',
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .bodyMedium
+                                                              ?.copyWith(
+                                                                color: scheme
+                                                                    .onSurfaceVariant,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                              ),
+                                                        ),
+                                                        TextSpan(
+                                                          text: ' ${_pluralSets(exercise.sets.length)}',
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .bodySmall
+                                                              ?.copyWith(
+                                                                color: scheme
+                                                                    .onSurfaceVariant,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 4),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
                                                       exercise
@@ -1574,22 +1620,25 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                         ),
                                 ),
                               ),
-                              IconButton(
-                                onPressed: () =>
-                                    _openExerciseNoteDialog(exerciseIndex),
-                                tooltip: 'Заметка к упражнению',
-                                visualDensity: VisualDensity.compact,
-                                icon: Icon(
-                                  exercise.noteController.text.isNotEmpty
-                                      ? Icons.sticky_note_2
-                                      : Icons.sticky_note_2_outlined,
-                                  size: 20,
-                                  color: exercise.noteController.text.isNotEmpty
-                                      ? scheme.secondary
-                                      : scheme.onSurfaceVariant
-                                          .withValues(alpha: 0.5),
+                              if (!exercise.isCollapsed ||
+                                  exercise.noteController.text.isNotEmpty)
+                                IconButton(
+                                  onPressed: () =>
+                                      _openExerciseNoteDialog(exerciseIndex),
+                                  tooltip: 'Заметка к упражнению',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: Icon(
+                                    exercise.noteController.text.isNotEmpty
+                                        ? Icons.sticky_note_2
+                                        : Icons.sticky_note_2_outlined,
+                                    size: 20,
+                                    color:
+                                        exercise.noteController.text.isNotEmpty
+                                            ? scheme.secondary
+                                            : scheme.onSurfaceVariant
+                                                .withValues(alpha: 0.5),
+                                  ),
                                 ),
-                              ),
                               IconButton(
                                 onPressed: () => setState(
                                   () => exercise.isCollapsed =
@@ -1615,7 +1664,8 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                 ),
                             ],
                           ),
-                          if (exercise.noteController.text.isNotEmpty) ...[
+                          if (!exercise.isCollapsed &&
+                              exercise.noteController.text.isNotEmpty) ...[
                             const SizedBox(height: 6),
                             GestureDetector(
                               onTap: () =>
@@ -1756,17 +1806,6 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                         TextStyle(fontWeight: FontWeight.w600)),
                               ),
                             ),
-                          ] else ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              'Подходов: ${exercise.sets.length}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                            ),
                           ],
                         ],
                       ),
@@ -1887,6 +1926,16 @@ class _ExerciseDraft {
       set.dispose();
     }
   }
+}
+
+String _pluralSets(int n) {
+  final mod10 = n % 10;
+  final mod100 = n % 100;
+  if (mod10 == 1 && mod100 != 11) return 'подход';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return 'подхода';
+  }
+  return 'подходов';
 }
 
 String _normalizeExerciseLookupName(String value) {

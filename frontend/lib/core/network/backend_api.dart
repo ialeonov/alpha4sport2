@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../auth/auth_session.dart';
 import '../storage/local_cache.dart';
+import '../storage/offline_queue.dart';
 import 'backend_api_exception.dart';
 
 class BackendApi {
@@ -100,6 +102,8 @@ class BackendApi {
           throw const BackendApiException('Название упражнения обязательно.');
         case 'Body entry not found':
           throw const BackendApiException('Запись параметров тела не найдена.');
+        case 'Wellness entry not found':
+          throw const BackendApiException('Запись самочувствия не найдена.');
         case 'Больничный не найден.':
           throw const BackendApiException('Больничный не найден.');
         case 'В этом месяце уже использован доступный больничный эпизод.':
@@ -255,6 +259,62 @@ class BackendApi {
     }
   }
 
+  static String _dateOnlyParam(DateTime date) {
+    final local = DateTime(date.year, date.month, date.day);
+    return local.toIso8601String().substring(0, 10);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWellnessEntries({
+    DateTime? start,
+    DateTime? end,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get(
+        '/api/v1/wellness',
+        queryParameters: {
+          if (start != null) 'start': _dateOnlyParam(start),
+          if (end != null) 'end': _dateOnlyParam(end),
+        },
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось загрузить самочувствие.',
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> upsertWellnessEntry({
+    required DateTime date,
+    required int sleep,
+    required int energy,
+    required int stress,
+    required int mood,
+    String? comment,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.put(
+        '/api/v1/wellness/${_dateOnlyParam(date)}',
+        data: {
+          'sleep': sleep,
+          'energy': energy,
+          'stress': stress,
+          'mood': mood,
+          'comment': comment,
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось сохранить самочувствие.',
+      );
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getWorkouts() async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -263,6 +323,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.workoutsCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить тренировки.');
     }
@@ -322,20 +386,41 @@ class BackendApi {
     DateTime? finishedAt,
     String? notes,
   }) async {
+    final payload = {
+      'name': name,
+      'notes': notes,
+      'started_at': startedAt.toUtc().toIso8601String(),
+      'finished_at': finishedAt?.toUtc().toIso8601String(),
+      'exercises': exercises,
+    };
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response = await dio.post(
-        '/api/v1/workouts',
-        data: {
+      final response = await dio.post('/api/v1/workouts', data: payload);
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      if (_isConnectionError(error)) {
+        await OfflineQueue.add('create_workout', payload);
+        final tempId = -DateTime.now().millisecondsSinceEpoch;
+        final localResult = <String, dynamic>{
+          'id': tempId,
           'name': name,
           'notes': notes,
           'started_at': startedAt.toUtc().toIso8601String(),
-          'finished_at': finishedAt?.toUtc().toIso8601String(),
+          'finished_at':
+              (finishedAt ?? startedAt.add(const Duration(hours: 1)))
+                  .toUtc()
+                  .toIso8601String(),
           'exercises': exercises,
-        },
-      );
-      return (response.data as Map).cast<String, dynamic>();
-    } on DioException catch (error) {
+        };
+        final raw = LocalCache.get<List>(CacheKeys.workoutsCache);
+        if (raw != null) {
+          final list =
+              raw.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+          list.insert(0, localResult);
+          await LocalCache.put(CacheKeys.workoutsCache, list);
+        }
+        return localResult;
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось сохранить тренировку.');
     }
@@ -349,24 +434,41 @@ class BackendApi {
     DateTime? finishedAt,
     String? notes,
   }) async {
+    final payload = {
+      'workout_id': workoutId,
+      'name': name,
+      'notes': notes,
+      'started_at': startedAt.toUtc().toIso8601String(),
+      'finished_at': finishedAt?.toUtc().toIso8601String(),
+      'exercises': exercises,
+    };
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response = await dio.put(
-        '/api/v1/workouts/$workoutId',
-        data: {
+      final response =
+          await dio.put('/api/v1/workouts/$workoutId', data: payload);
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      if (_isConnectionError(error)) {
+        await OfflineQueue.add('update_workout', payload);
+        return {
+          'id': workoutId,
           'name': name,
           'notes': notes,
           'started_at': startedAt.toUtc().toIso8601String(),
           'finished_at': finishedAt?.toUtc().toIso8601String(),
           'exercises': exercises,
-        },
-      );
-      return (response.data as Map).cast<String, dynamic>();
-    } on DioException catch (error) {
+        };
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось обновить тренировку.');
     }
   }
+
+  static bool _isConnectionError(DioException error) =>
+      error.type == DioExceptionType.connectionError ||
+      error.type == DioExceptionType.connectionTimeout ||
+      error.type == DioExceptionType.sendTimeout ||
+      error.type == DioExceptionType.receiveTimeout;
 
   static Future<void> deleteWorkout(int workoutId) async {
     try {
@@ -386,6 +488,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.templatesCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.templatesCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить шаблоны.');
     }
@@ -547,6 +653,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.exerciseCatalogCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить каталог упражнений.');
     }
@@ -635,6 +745,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.bodyEntriesCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.bodyEntriesCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить параметры тела.');
     }
@@ -689,6 +803,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.bodyweightTrendCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.bodyweightTrendCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить динамику веса.');
     }
@@ -702,6 +820,10 @@ class BackendApi {
       await LocalCache.put(CacheKeys.weeklyVolumeCache, data);
       return data;
     } on DioException catch (error) {
+      final cached = LocalCache.get<List>(CacheKeys.weeklyVolumeCache);
+      if (cached != null) {
+        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось загрузить недельный объём.');
     }
@@ -749,6 +871,7 @@ class BackendApi {
   static Future<Map<String, dynamic>> chatWithCoach({
     required List<Map<String, String>> messages,
     bool saveHistory = true,
+    List<Map<String, dynamic>>? wellnessEntries,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -757,6 +880,8 @@ class BackendApi {
         data: {
           'messages': messages,
           'save_history': saveHistory,
+          if (wellnessEntries != null && wellnessEntries.isNotEmpty)
+            'wellness_entries': wellnessEntries,
         },
       );
       return (response.data as Map).cast<String, dynamic>();
@@ -768,11 +893,105 @@ class BackendApi {
     }
   }
 
+  static Stream<String> chatWithCoachStream({
+    required List<Map<String, String>> messages,
+    bool saveHistory = true,
+    List<Map<String, dynamic>>? wellnessEntries,
+  }) {
+    final controller = StreamController<String>();
+
+    Future<void> fetch() async {
+      try {
+        final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+        dio.options.receiveTimeout = const Duration(minutes: 3);
+
+        final response = await dio.post<ResponseBody>(
+          '/api/v1/coach/chat/stream',
+          data: {
+            'messages': messages,
+            'save_history': saveHistory,
+            if (wellnessEntries != null && wellnessEntries.isNotEmpty)
+              'wellness_entries': wellnessEntries,
+          },
+          options: Options(
+            responseType: ResponseType.stream,
+            headers: {
+              'Accept': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+            },
+          ),
+        );
+
+        final responseBody = response.data;
+        if (responseBody == null) {
+          controller.addError(BackendApiException('Ошибка AI-коуча: пустой ответ сервера'));
+          return;
+        }
+
+        // Используем allowMalformed: true — на Android HTTP-стек может
+        // разрезать многобайтный UTF-8 символ между двумя пакетами.
+        final buffer = StringBuffer();
+        await for (final bytes in responseBody.stream) {
+          buffer.write(utf8.decode(bytes, allowMalformed: true));
+          final text = buffer.toString();
+          buffer.clear();
+
+          final events = text.split('\n\n');
+          for (var i = 0; i < events.length - 1; i++) {
+            for (final line in events[i].split('\n')) {
+              if (!line.startsWith('data: ')) continue;
+              final data = line.substring(6).trim();
+              try {
+                final parsed = jsonDecode(data) as Map<String, dynamic>;
+                final chunk = parsed['chunk'] as String?;
+                if (chunk != null) {
+                  controller.add(chunk);
+                } else if (parsed['error'] != null) {
+                  controller.addError(
+                      BackendApiException(parsed['error'] as String));
+                  return;
+                } else if (parsed['done'] == true) {
+                  return;
+                }
+              } catch (_) {}
+            }
+          }
+          if (events.isNotEmpty) buffer.write(events.last);
+        }
+
+        // flush remaining buffer
+        for (final line in buffer.toString().split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          final data = line.substring(6).trim();
+          try {
+            final parsed = jsonDecode(data) as Map<String, dynamic>;
+            final chunk = parsed['chunk'] as String?;
+            if (chunk != null) controller.add(chunk);
+          } catch (_) {}
+        }
+      } on DioException catch (error) {
+        final detail = error.response?.statusCode != null
+            ? 'HTTP ${error.response!.statusCode}'
+            : error.type.name;
+        controller.addError(BackendApiException(
+            'Ошибка AI-коуча: $detail — ${error.message ?? ''}'));
+      } catch (e) {
+        controller.addError(BackendApiException('Ошибка AI-коуча: $e'));
+      } finally {
+        controller.close();
+      }
+    }
+
+    fetch();
+    return controller.stream;
+  }
+
   static Future<Map<String, dynamic>> generateCoachWorkout({
     required String intensityTitle,
     required int minExercises,
     required int maxExercises,
     String? userNotes,
+    List<Map<String, dynamic>>? wellnessEntries,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -784,6 +1003,8 @@ class BackendApi {
           'max_exercises': maxExercises,
           if (userNotes != null && userNotes.isNotEmpty)
             'user_notes': userNotes,
+          if (wellnessEntries != null && wellnessEntries.isNotEmpty)
+            'wellness_entries': wellnessEntries,
         },
       );
       return (response.data as Map).cast<String, dynamic>();
@@ -1065,7 +1286,7 @@ class BackendApi {
   }
 
   static Future<Map<String, dynamic>> updateFitnessProfile({
-    String? goal,
+    List<String>? goals,
     String? experience,
     String? gender,
     String? injuries,
@@ -1076,7 +1297,7 @@ class BackendApi {
       final response = await dio.put(
         '/api/v1/users/me/fitness-profile',
         data: {
-          'goal': goal,
+          'goals': goals ?? [],
           'experience': experience,
           'gender': gender,
           'injuries': injuries,

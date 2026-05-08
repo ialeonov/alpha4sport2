@@ -2,7 +2,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/network/backend_api.dart';
-import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
@@ -177,32 +176,12 @@ class _ProgressScreenState extends State<ProgressScreen>
     return _ProgressData(report: report, muscleMap: muscleMap);
   }
 
-  Future<List<Map<String, dynamic>>> _loadWorkouts() async {
-    try {
-      return await BackendApi.getWorkouts();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
-      }
-      rethrow;
-    }
-  }
+  Future<List<Map<String, dynamic>>> _loadWorkouts() => BackendApi.getWorkouts();
 
   Future<List<Map<String, dynamic>>> _loadTemplates() async {
     try {
       return await BackendApi.getTemplates();
     } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.templatesCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
-      }
       return const [];
     }
   }
@@ -211,13 +190,6 @@ class _ProgressScreenState extends State<ProgressScreen>
     try {
       return await BackendApi.getExercises();
     } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
-      }
       return const [];
     }
   }
@@ -262,55 +234,36 @@ class _ProgressScreenState extends State<ProgressScreen>
   @override
   Widget build(BuildContext context) {
     return AppBackdrop(
-      child: FutureBuilder<_ProgressData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  BackendApi.describeError(snapshot.error!,
-                      fallback: 'Не удалось загрузить прогресс.'),
-                  textAlign: TextAlign.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: ScreenHeader(title: 'Прогресс'),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _StyledTabBar(controller: _tabController),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _ProgressDataTab(
+                  future: _future,
+                  builder: (data) => _StatisticsTab(
+                    report: data.report,
+                    onRefresh: _refresh,
+                  ),
                 ),
-              ),
-            );
-          }
-
-          final data = snapshot.data!;
-          final report = data.report;
-          final stats = _computeStats(report);
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Fixed header ──────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                child: const ScreenHeader(title: 'Прогресс'),
-              ),
-              const SizedBox(height: 12),
-              // ── Tab bar ───────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _StyledTabBar(controller: _tabController),
-              ),
-              const SizedBox(height: 10),
-              // ── Tab content ───────────────────────────────────────────
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _StatisticsTab(
-                      report: report,
-                      onRefresh: _refresh,
-                    ),
-                    _RecommendationsTab(
-                      report: report,
+                _ProgressDataTab(
+                  future: _future,
+                  builder: (data) {
+                    final stats = _computeStats(data.report);
+                    return _RecommendationsTab(
+                      report: data.report,
                       stats: stats,
                       searchController: _searchController,
                       activeFilter: _activeFilter,
@@ -321,14 +274,233 @@ class _ProgressScreenState extends State<ProgressScreen>
                       onSearchChanged: () => setState(() {}),
                       applyFilter: _applyFilter,
                       onRefresh: _refresh,
-                    ),
-                  ],
+                    );
+                  },
                 ),
-              ),
-            ],
-          );
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Statistics screen ────────────────────────────────────────────────────────
+
+class StatisticsScreen extends StatefulWidget {
+  const StatisticsScreen({super.key});
+
+  @override
+  State<StatisticsScreen> createState() => _StatisticsScreenState();
+}
+
+class _StatisticsScreenState extends State<StatisticsScreen> {
+  static const _service = ProgressAnalysisService();
+  late Future<_ProgressData> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<_ProgressData> _load() async {
+    final results = await Future.wait([_workouts(), _templates(), _catalog()]);
+    final report =
+        _service.buildReport(workouts: results[0], templates: results[1]);
+    final muscleMap = {
+      for (final ex in results[2])
+        (ex['name'] as String? ?? '').trim().toLowerCase():
+            (ex['primary_muscle'] as String? ?? '').trim(),
+    };
+    return _ProgressData(report: report, muscleMap: muscleMap);
+  }
+
+  Future<List<Map<String, dynamic>>> _workouts() => BackendApi.getWorkouts();
+
+  Future<List<Map<String, dynamic>>> _templates() async {
+    try {
+      return await BackendApi.getTemplates();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _catalog() async {
+    try {
+      return await BackendApi.getExercises();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ProgressDataTab(
+      future: _future,
+      builder: (data) => _StatisticsTab(
+        report: data.report,
+        onRefresh: () async {
+          setState(() => _future = _load());
+          await _future;
         },
       ),
+    );
+  }
+}
+
+// ── Recommendations screen ────────────────────────────────────────────────────
+
+class RecommendationsScreen extends StatefulWidget {
+  const RecommendationsScreen({super.key});
+
+  @override
+  State<RecommendationsScreen> createState() => _RecommendationsScreenState();
+}
+
+class _RecommendationsScreenState extends State<RecommendationsScreen> {
+  static const _service = ProgressAnalysisService();
+  late Future<_ProgressData> _future;
+  final TextEditingController _searchController = TextEditingController();
+  _FilterTab _activeFilter = _FilterTab.all;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<_ProgressData> _load() async {
+    final results = await Future.wait([_workouts(), _templates(), _catalog()]);
+    final report =
+        _service.buildReport(workouts: results[0], templates: results[1]);
+    final muscleMap = {
+      for (final ex in results[2])
+        (ex['name'] as String? ?? '').trim().toLowerCase():
+            (ex['primary_muscle'] as String? ?? '').trim(),
+    };
+    return _ProgressData(report: report, muscleMap: muscleMap);
+  }
+
+  Future<List<Map<String, dynamic>>> _workouts() => BackendApi.getWorkouts();
+
+  Future<List<Map<String, dynamic>>> _templates() async {
+    try {
+      return await BackendApi.getTemplates();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _catalog() async {
+    try {
+      return await BackendApi.getExercises();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  List<ExerciseProgressAnalysis> _sorted(ProgressAnalysisReport report) {
+    return List<ExerciseProgressAnalysis>.from(report.allExercises)
+      ..sort((a, b) {
+        final p = _decisionPriority(a) - _decisionPriority(b);
+        if (p != 0) return p;
+        return a.exerciseName.compareTo(b.exerciseName);
+      });
+  }
+
+  List<ExerciseProgressAnalysis> _applyFilter(
+      ProgressAnalysisReport report, String query) {
+    final sorted = _sorted(report);
+    final afterFilter = switch (_activeFilter) {
+      _FilterTab.all => sorted,
+      _FilterTab.increase =>
+        sorted.where((a) => a.decision == ProgressDecision.increase).toList(),
+      _FilterTab.keep => sorted
+          .where((a) => a.decision == ProgressDecision.keep && !a.isStalled)
+          .toList(),
+      _FilterTab.attention => sorted
+          .where((a) =>
+              a.decision == ProgressDecision.decrease ||
+              a.decision == ProgressDecision.insufficientData ||
+              a.isStalled)
+          .toList(),
+    };
+    if (query.isEmpty) return afterFilter;
+    return afterFilter
+        .where((a) => a.exerciseName.toLowerCase().contains(query))
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ProgressDataTab(
+      future: _future,
+      builder: (data) {
+        final stats = _computeStats(data.report);
+        return _RecommendationsTab(
+          report: data.report,
+          stats: stats,
+          searchController: _searchController,
+          activeFilter: _activeFilter,
+          onFilterChanged: (tab) => setState(() {
+            _activeFilter = tab;
+            _searchController.clear();
+          }),
+          onSearchChanged: () => setState(() {}),
+          applyFilter: _applyFilter,
+          onRefresh: () async {
+            setState(() => _future = _load());
+            await _future;
+          },
+        );
+      },
+    );
+  }
+}
+
+// ── Progress data tab ─────────────────────────────────────────────────────────
+
+class _ProgressDataTab extends StatelessWidget {
+  const _ProgressDataTab({
+    required this.future,
+    required this.builder,
+  });
+
+  final Future<_ProgressData> future;
+  final Widget Function(_ProgressData data) builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_ProgressData>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                BackendApi.describeError(
+                  snapshot.error!,
+                  fallback: 'Не удалось загрузить прогресс.',
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        return builder(snapshot.data!);
+      },
     );
   }
 }
@@ -348,7 +520,8 @@ class _StyledTabBar extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.62),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.55)),
+        border:
+            Border.all(color: scheme.outlineVariant.withValues(alpha: 0.55)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.07),

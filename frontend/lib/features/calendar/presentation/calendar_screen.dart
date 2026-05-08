@@ -6,9 +6,13 @@ import '../../../core/network/backend_api.dart';
 import '../../../core/storage/local_cache.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
 import '../../progression/application/progression_controller.dart';
+import '../../wellness/data/wellness_repository.dart';
+import '../../wellness/domain/wellness_entry.dart';
+import '../../wellness/presentation/wellness_widgets.dart';
 import '../../workouts/application/workout_export_service.dart';
 import '../../workouts/application/workout_share_service.dart';
 import '../../workouts/domain/workout_metrics.dart';
@@ -58,6 +62,7 @@ class CalendarScreenState extends State<CalendarScreen> {
   late Future<List<Map<String, dynamic>>> _catalogFuture;
   late DateTime _displayedMonth;
   late DateTime _selectedDay;
+  int _wellnessVersion = 0;
   final WorkoutExportService _workoutExportService =
       const WorkoutExportService();
 
@@ -69,6 +74,7 @@ class CalendarScreenState extends State<CalendarScreen> {
     _selectedDay = DateUtils.dateOnly(now);
     _future = _loadWorkouts();
     _catalogFuture = _loadExerciseCatalog();
+    unawaited(_syncDisplayedMonthWellness());
   }
 
   Future<List<Map<String, dynamic>>> _loadWorkouts() async {
@@ -96,20 +102,13 @@ class CalendarScreenState extends State<CalendarScreen> {
       _future = _loadWorkouts();
       _catalogFuture = _loadExerciseCatalog();
     });
-    await Future.wait([_future, _catalogFuture]);
+    await Future.wait([_future, _catalogFuture, _syncDisplayedMonthWellness()]);
   }
 
   Future<List<Map<String, dynamic>>> _loadExerciseCatalog() async {
     try {
       return await BackendApi.getExercises();
     } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
-      }
       return const [];
     }
   }
@@ -463,6 +462,16 @@ class CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
+  Future<void> _openCoachForWorkout(Map<String, dynamic> workout) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiCoachScreen(
+          initialMessage: 'Разбери тренировку от ${_workoutCoachDate(workout)}',
+        ),
+      ),
+    );
+  }
+
   Future<void> _exportSelectedDayWorkouts(
     List<Map<String, dynamic>> workouts,
   ) async {
@@ -799,6 +808,27 @@ class CalendarScreenState extends State<CalendarScreen> {
       _displayedMonth =
           DateTime(_displayedMonth.year, _displayedMonth.month + delta);
     });
+    unawaited(_syncDisplayedMonthWellness());
+  }
+
+  Future<void> _syncDisplayedMonthWellness() async {
+    final start = DateTime(_displayedMonth.year, _displayedMonth.month);
+    final end = DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0);
+    try {
+      await WellnessRepository.syncRange(start: start, end: end);
+      if (mounted) setState(() => _wellnessVersion++);
+    } catch (_) {
+      // Calendar can still render cached wellness colors offline.
+    }
+  }
+
+  Map<DateTime, WellnessZone> _loadWellnessZones(List<DateTime> dates) {
+    final zones = <DateTime, WellnessZone>{};
+    for (final date in dates) {
+      final entry = WellnessRepository.loadForDate(date);
+      if (entry != null) zones[date] = entry.zone;
+    }
+    return zones;
   }
 
   DateTime? _parseWorkoutDay(Map<String, dynamic> workout) {
@@ -838,6 +868,7 @@ class CalendarScreenState extends State<CalendarScreen> {
     bool compact,
     List<Map<String, dynamic>> allWorkouts,
     List<Map<String, dynamic>> exerciseCatalog,
+    Map<DateTime, WellnessZone> wellnessZones,
   ) {
     final first = DateTime(_displayedMonth.year, _displayedMonth.month, 1);
     final daysInMonth =
@@ -858,6 +889,7 @@ class CalendarScreenState extends State<CalendarScreen> {
       final date = DateTime(_displayedMonth.year, _displayedMonth.month, day);
       final dayWorkouts = byDay[date] ?? const <Map<String, dynamic>>[];
       final hasWorkouts = dayWorkouts.isNotEmpty;
+      final wellnessZone = wellnessZones[date];
       final isSelected = DateUtils.isSameDay(date, _selectedDay);
       final isToday = DateUtils.isSameDay(date, DateTime.now());
       cellDates.add(date);
@@ -873,13 +905,15 @@ class CalendarScreenState extends State<CalendarScreen> {
               borderRadius: BorderRadius.circular(compact ? 10 : 12),
               color: isSelected
                   ? scheme.primary
-                  : hasWorkouts
-                      ? scheme.primaryContainer.withValues(
-                          alpha: scheme.brightness == Brightness.dark
-                              ? 0.22
-                              : 0.60,
-                        )
-                      : Colors.transparent,
+                  : wellnessZone != null
+                      ? wellnessZoneCellColor(wellnessZone)
+                      : hasWorkouts
+                          ? scheme.primaryContainer.withValues(
+                              alpha: scheme.brightness == Brightness.dark
+                                  ? 0.22
+                                  : 0.60,
+                            )
+                          : Colors.transparent,
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -988,6 +1022,12 @@ class CalendarScreenState extends State<CalendarScreen> {
     return '${_selectedDay.day} $month ${_selectedDay.year}';
   }
 
+  String _workoutCoachDate(Map<String, dynamic> workout) {
+    final day = _parseWorkoutDay(workout) ?? _selectedDay;
+    final month = _monthGenitive[day.month - 1];
+    return '${day.day} $month ${day.year}';
+  }
+
   String _workoutSubtitle(Map<String, dynamic> workout) {
     final exercises =
         (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
@@ -1065,6 +1105,20 @@ class CalendarScreenState extends State<CalendarScreen> {
             final selectedDayWorkouts =
                 byDay[_selectedDay] ?? const <Map<String, dynamic>>[];
             final monthCount = _workoutsInDisplayedMonth(byDay);
+
+            final daysInMonth =
+                DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0)
+                    .day;
+            final monthDates = List.generate(
+              daysInMonth,
+              (i) =>
+                  DateTime(_displayedMonth.year, _displayedMonth.month, i + 1),
+            );
+            final wellnessZones = _wellnessVersion >= 0
+                ? _loadWellnessZones(monthDates)
+                : const <DateTime, WellnessZone>{};
+            final selectedDayWellness =
+                WellnessRepository.loadForDate(_selectedDay);
 
             return FutureBuilder<List<Map<String, dynamic>>>(
               future: _catalogFuture,
@@ -1183,6 +1237,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                                     compactCalendar,
                                     workouts,
                                     exerciseCatalog,
+                                    wellnessZones,
                                   ),
                                 ],
                               ),
@@ -1303,6 +1358,25 @@ class CalendarScreenState extends State<CalendarScreen> {
                                               ),
                                             ],
                                             const SizedBox(width: 4),
+                                            if (!isActive)
+                                              SizedBox(
+                                                width: 32,
+                                                height: 32,
+                                                child: IconButton(
+                                                  padding: EdgeInsets.zero,
+                                                  icon: Icon(
+                                                    Icons.auto_awesome_rounded,
+                                                    size: 18,
+                                                    color: scheme.primary,
+                                                  ),
+                                                  tooltip:
+                                                      'Разобрать с AI-коучем',
+                                                  onPressed: () =>
+                                                      _openCoachForWorkout(
+                                                    workout,
+                                                  ),
+                                                ),
+                                              ),
                                             SizedBox(
                                               width: 32,
                                               height: 32,
@@ -1398,29 +1472,59 @@ class CalendarScreenState extends State<CalendarScreen> {
                                                   Align(
                                                     alignment:
                                                         Alignment.centerRight,
-                                                    child: SizedBox(
-                                                      width: 32,
-                                                      height: 32,
-                                                      child: IconButton(
-                                                        padding:
-                                                            EdgeInsets.zero,
-                                                        icon: Icon(
-                                                          Icons
-                                                              .ios_share_rounded,
-                                                          size: 18,
-                                                          color: scheme
-                                                              .onSurfaceVariant
-                                                              .withValues(
-                                                                  alpha: 0.65),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        if (!isActive)
+                                                          SizedBox(
+                                                            width: 32,
+                                                            height: 32,
+                                                            child: IconButton(
+                                                              padding:
+                                                                  EdgeInsets
+                                                                      .zero,
+                                                              icon: Icon(
+                                                                Icons
+                                                                    .auto_awesome_rounded,
+                                                                size: 18,
+                                                                color: scheme
+                                                                    .primary,
+                                                              ),
+                                                              tooltip:
+                                                                  'Разобрать с AI-коучем',
+                                                              onPressed: () =>
+                                                                  _openCoachForWorkout(
+                                                                workout,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        SizedBox(
+                                                          width: 32,
+                                                          height: 32,
+                                                          child: IconButton(
+                                                            padding:
+                                                                EdgeInsets.zero,
+                                                            icon: Icon(
+                                                              Icons
+                                                                  .ios_share_rounded,
+                                                              size: 18,
+                                                              color: scheme
+                                                                  .onSurfaceVariant
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.65),
+                                                            ),
+                                                            tooltip:
+                                                                'Поделиться карточкой',
+                                                            onPressed: () =>
+                                                                _shareWorkout(
+                                                              workout,
+                                                              exerciseCatalog,
+                                                            ),
+                                                          ),
                                                         ),
-                                                        tooltip:
-                                                            'Поделиться карточкой',
-                                                        onPressed: () =>
-                                                            _shareWorkout(
-                                                          workout,
-                                                          exerciseCatalog,
-                                                        ),
-                                                      ),
+                                                      ],
                                                     ),
                                                   ),
                                                 ],
@@ -1455,6 +1559,15 @@ class CalendarScreenState extends State<CalendarScreen> {
                         },
                       ),
                       SizedBox(height: compactCalendar ? 4 : 8),
+                      DashboardSectionLabel('Самочувствие'),
+                      const SizedBox(height: 8),
+                      WellnessCard(
+                        entry: selectedDayWellness,
+                        date: _selectedDay,
+                        onChanged: () => setState(() => _wellnessVersion++),
+                        emptyLabel: 'Добавить самочувствие',
+                      ),
+                      SizedBox(height: compactCalendar ? 8 : 12),
                       if (compactCalendar)
                         Row(
                           children: [

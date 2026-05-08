@@ -7,6 +7,7 @@ class ExerciseSetIn(BaseModel):
     position: int = Field(ge=1)
     reps: int = Field(ge=0)
     weight: float | None = Field(default=None, ge=0)
+    set_type: str = Field(default='work', max_length=16)
     rpe: float | None = Field(default=None, ge=0, le=10)
     notes: str | None = None
 

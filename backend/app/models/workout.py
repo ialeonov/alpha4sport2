@@ -49,6 +49,7 @@ class ExerciseSet(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     reps: Mapped[int] = mapped_column(Integer, nullable=False)
     weight: Mapped[float | None] = mapped_column(Float)
+    set_type: Mapped[str] = mapped_column(String(16), nullable=False, default='work', server_default='work')
     rpe: Mapped[float | None] = mapped_column(Float)
     notes: Mapped[str | None] = mapped_column(Text)
 

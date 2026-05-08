@@ -31,4 +31,8 @@ else
   echo "    Install Flutter on VPS if you want the web frontend to deploy from Git too."
 fi
 
+echo "==> Updating nginx config"
+sudo cp "$PROJECT_ROOT/deploy/nginx.conf" /etc/nginx/sites-available/fit.ileonov.ru
+sudo nginx -t && sudo systemctl reload nginx
+
 echo "==> Deployment finished"

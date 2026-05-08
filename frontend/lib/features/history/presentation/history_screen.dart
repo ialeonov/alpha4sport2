@@ -40,13 +40,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       final catalog = await BackendApi.getExercises();
       if (mounted) setState(() => _exerciseCatalog = catalog);
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
-      if (cached != null && mounted) {
-        setState(() => _exerciseCatalog =
-            cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList());
-      }
-    }
+    } catch (_) {}
   }
 
   @override
@@ -56,18 +50,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _loadWorkouts() async {
-    try {
-      return await BackendApi.getWorkouts();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
-      }
-      rethrow;
-    }
+    return BackendApi.getWorkouts();
   }
 
   Future<void> _refresh() async {

@@ -9,6 +9,7 @@ from app.models.workout import ExerciseCatalog, ExerciseSecondaryMuscle
 from app.schemas.workout import ExerciseCatalogCreate, ExerciseCatalogOut, ExerciseCatalogUpdate
 from app.services.exercise_catalog import (
     build_unique_slug,
+    canonicalize_muscle,
     ensure_seed_catalog,
     list_catalog_exercises_stmt,
     serialize_exercise_catalog,
@@ -44,7 +45,7 @@ def create_exercise(
     if duplicate:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Упражнение уже существует')
 
-    primary_muscle = payload.primary_muscle.strip()
+    primary_muscle = canonicalize_muscle(payload.primary_muscle)
     try:
         secondary_clean = validate_muscles(primary_muscle, payload.secondary_muscles)
     except ValueError as exc:
@@ -95,7 +96,7 @@ def update_exercise(
     if duplicate:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Упражнение уже существует')
 
-    primary_muscle = payload.primary_muscle.strip()
+    primary_muscle = canonicalize_muscle(payload.primary_muscle)
     try:
         secondary_clean = validate_muscles(primary_muscle, payload.secondary_muscles)
     except ValueError as exc:

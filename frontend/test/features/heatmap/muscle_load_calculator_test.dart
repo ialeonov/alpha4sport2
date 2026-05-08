@@ -161,6 +161,34 @@ void main() {
       expect(loads['triceps']!, closeTo(1.44, 0.001));
     });
 
+    test('merges back extensors into core', () {
+      final loads = calculator.calculateForWorkout(
+        workout: {
+          'exercises': [
+            {
+              'catalog_exercise_id': 12,
+              'exercise_name': 'Back extension',
+              'sets': [
+                {'reps': 12, 'weight': 20},
+              ],
+            },
+          ],
+        },
+        exerciseCatalog: [
+          {
+            'id': 12,
+            'name': 'Back extension',
+            'primary_muscle': 'разгибатель_спины',
+            'secondary_muscles': ['кор', 'поясница'],
+          },
+        ],
+      );
+
+      expect(loads.containsKey('разгибатель_спины'), isFalse);
+      expect(loads.containsKey('поясница'), isFalse);
+      expect(loads['кор'], closeTo(0.66, 0.01));
+    });
+
     test('keeps peak daily load instead of summing across calendar days', () {
       final loads = calculator.calculatePeakForCalendarDays(
         workouts: [

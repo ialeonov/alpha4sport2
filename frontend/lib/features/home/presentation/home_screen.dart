@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/network/backend_api.dart';
 import '../../../core/storage/local_cache.dart';
+import '../../../core/widgets/offline_banner.dart';
 import '../../calendar/presentation/calendar_screen.dart';
+import '../../workouts/domain/workout_metrics.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../more/presentation/more_screen.dart';
-import '../../progress/presentation/progress_screen.dart';
 import '../../progression/application/progression_controller.dart';
 import '../../progression/presentation/progression_compact_badge.dart';
 import '../../social/presentation/social_hub_screen.dart';
@@ -84,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       const TodayScreen(),
       CalendarScreen(key: _calendarKey),
-      ProgressScreen(),
+      const AiCoachChat(wrapInBackdrop: true),
       MoreScreen(
         onLogout: _logout,
         onOpenSocialHub: _openSocialHub,
@@ -94,7 +96,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const tabs = [
       (Icons.today_rounded, 'Сегодня'),
       (Icons.calendar_month, 'Журнал'),
-      (Icons.bar_chart_rounded, 'Прогресс'),
+      (Icons.chat_bubble_rounded, 'Тренер'),
       (Icons.menu_rounded, 'Меню'),
     ];
 
@@ -112,9 +114,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      body: IndexedStack(
-        index: _index,
-        children: pages,
+      body: OfflineBanner(
+        child: IndexedStack(
+          index: _index,
+          children: pages,
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -159,8 +163,8 @@ class _HomeWeeklyStats extends StatelessWidget {
         );
         final weekEnd = weekStart.add(const Duration(days: 7));
 
-        int weekCount = 0;
         double tonnage = 0;
+        bool hasThisWeek = false;
         for (final workout in workouts) {
           final startedAt =
               DateTime.tryParse((workout['started_at'] ?? '').toString())
@@ -170,37 +174,15 @@ class _HomeWeeklyStats extends StatelessWidget {
               !startedAt.isBefore(weekEnd)) {
             continue;
           }
-          weekCount++;
-          for (final raw
-              in (workout['exercises'] as List?)?.cast<dynamic>() ??
-                  const <dynamic>[]) {
-            final ex = (raw as Map).cast<String, dynamic>();
-            for (final rawSet
-                in (ex['sets'] as List?)?.cast<dynamic>() ??
-                    const <dynamic>[]) {
-              final s = (rawSet as Map).cast<String, dynamic>();
-              if ((s['set_type'] ?? '') == 'warmup') continue;
-              final weight = (s['weight'] as num?)?.toDouble() ?? 0;
-              final reps = (s['reps'] as num?)?.toInt() ?? 0;
-              tonnage += weight * reps;
-            }
-          }
+          hasThisWeek = true;
+          tonnage += calculateWorkoutTonnage(workout);
         }
 
-        if (weekCount == 0 && tonnage == 0) return const SizedBox.shrink();
+        if (!hasThisWeek) return const SizedBox.shrink();
 
-        final tonnageLabel = tonnage >= 1000
-            ? '${(tonnage / 1000).toStringAsFixed(1)}т'
-            : '${tonnage.round()}кг';
+        final tonnageLabel = formatTonnage(tonnage);
 
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _StatPill(value: '$weekCount', label: 'трен/нед'),
-            const SizedBox(width: 6),
-            _StatPill(value: tonnageLabel, label: 'тоннаж'),
-          ],
-        );
+        return _StatPill(value: tonnageLabel, label: 'тоннаж');
       },
     );
   }

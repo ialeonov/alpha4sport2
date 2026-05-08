@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f'{settings.api_v1_prefix}/auth/login')
+OWNER_EMAIL = 'ialeonov@yandex.ru'
 
 
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
@@ -30,3 +31,12 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     if not user:
         raise credentials_exception
     return user
+
+
+def require_owner_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.email.strip().lower() != OWNER_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Access denied',
+        )
+    return current_user

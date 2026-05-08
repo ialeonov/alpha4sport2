@@ -6,10 +6,11 @@ import '../../../core/theme/theme_notifier.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../body/presentation/body_screen.dart';
-import '../../coach/presentation/ai_coach_screen.dart';
 import '../../programs/presentation/programs_screen.dart';
+import '../../progress/presentation/progress_screen.dart';
 import '../../templates/presentation/templates_screen.dart';
 import 'admin_functions_screen.dart';
+import 'fitness_profile_screen.dart';
 
 class MoreScreen extends StatefulWidget {
   static const _ownerEmail = 'ialeonov@yandex.ru';
@@ -48,10 +49,7 @@ class _MoreScreenState extends State<MoreScreen> {
       setState(() {
         _currentUserEmail = user['email']?.toString().trim().toLowerCase();
       });
-    } catch (_) {
-      // Quietly ignore: the owner-only tile should stay hidden if the profile
-      // couldn't be restored.
-    }
+    } catch (_) {}
   }
 
   void _openPage(
@@ -78,85 +76,143 @@ class _MoreScreenState extends State<MoreScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
         children: [
-          const ScreenHeader(
-            title: 'Инструменты',
-          ),
-          const SizedBox(height: 10),
-          _MoreTile(
-            title: 'AI-коуч',
-            icon: Icons.smart_toy_rounded,
-            iconColor: const Color(0xFF1A8F6D),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AiCoachScreen()),
-            ),
-          ),
-          if (isOwner) ...[
-            const SizedBox(height: 8),
-            _MoreTile(
-              title: 'Админ функции',
-              icon: Icons.admin_panel_settings_rounded,
-              iconColor: const Color(0xFF7A5A0A),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const AdminFunctionsScreen(),
+          const ScreenHeader(title: 'Инструменты'),
+          const SizedBox(height: 16),
+
+          // ── ТРЕНИРОВКИ ──────────────────────────────────────────
+          const DashboardSectionLabel('Тренировки'),
+          const SizedBox(height: 8),
+          DashboardCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _Tile(
+                  title: 'Программы',
+                  icon: Icons.auto_stories_rounded,
+                  iconColor: const Color(0xFF7C5CBF),
+                  onTap: () => _openPage(
+                    context,
+                    title: 'Программы',
+                    child: const ProgramsScreen(),
+                  ),
                 ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          _MoreTile(
-            title: 'Упражнения',
-            icon: Icons.fitness_center_rounded,
-            iconColor: scheme.tertiary,
-            onTap: () => _openPage(
-              context,
-              title: 'Упражнения',
-              child: const TemplatesScreen(section: TemplatesSection.exercises),
+                _Divider(),
+                _Tile(
+                  title: 'Шаблоны',
+                  icon: Icons.library_books_rounded,
+                  iconColor: scheme.secondary,
+                  onTap: () => _openPage(
+                    context,
+                    title: 'Шаблоны',
+                    child: const TemplatesScreen(
+                        section: TemplatesSection.templates),
+                  ),
+                ),
+                _Divider(),
+                _Tile(
+                  title: 'Упражнения',
+                  icon: Icons.fitness_center_rounded,
+                  iconColor: scheme.tertiary,
+                  onTap: () => _openPage(
+                    context,
+                    title: 'Упражнения',
+                    child: const TemplatesScreen(
+                        section: TemplatesSection.exercises),
+                  ),
+                ),
+                _Divider(),
+                _Tile(
+                  title: 'Статистика',
+                  icon: Icons.bar_chart_rounded,
+                  iconColor: const Color(0xFF1A6B75),
+                  onTap: () => _openPage(
+                    context,
+                    title: 'Статистика',
+                    child: const StatisticsScreen(),
+                  ),
+                ),
+                _Divider(),
+                _Tile(
+                  title: 'Рекомендации',
+                  icon: Icons.trending_up_rounded,
+                  iconColor: const Color(0xFF2E7D32),
+                  onTap: () => _openPage(
+                    context,
+                    title: 'Рекомендации',
+                    child: const RecommendationsScreen(),
+                  ),
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(height: 20),
+
+          // ── ПРОФИЛЬ ─────────────────────────────────────────────
+          const DashboardSectionLabel('Профиль'),
           const SizedBox(height: 8),
-          _MoreTile(
-            title: 'Шаблоны',
-            icon: Icons.library_books_rounded,
-            iconColor: scheme.secondary,
-            onTap: () => _openPage(
-              context,
-              title: 'Шаблоны',
-              child: const TemplatesScreen(section: TemplatesSection.templates),
+          DashboardCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _Tile(
+                  title: 'Фитнес профиль',
+                  icon: Icons.person_pin_rounded,
+                  iconColor: scheme.primary,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const FitnessProfileScreen(),
+                    ),
+                  ),
+                ),
+                _Divider(),
+                _Tile(
+                  title: 'Параметры тела',
+                  icon: Icons.monitor_weight_rounded,
+                  iconColor: const Color(0xFF1A8F6D),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BodyScreen()),
+                  ),
+                ),
+                _Divider(),
+                _Tile(
+                  title: 'Профиль и сообщество',
+                  icon: Icons.groups_2_rounded,
+                  iconColor: const Color(0xFF7C5CBF),
+                  onTap: () => widget.onOpenSocialHub(),
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(height: 20),
+
+          // ── СИСТЕМА ─────────────────────────────────────────────
+          const DashboardSectionLabel('Система'),
           const SizedBox(height: 8),
-          _MoreTile(
-            title: 'Программы',
-            icon: Icons.auto_stories_rounded,
-            iconColor: const Color(0xFF7C5CBF),
-            onTap: () => _openPage(
-              context,
-              title: 'Программы',
-              child: const ProgramsScreen(),
+          DashboardCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _ThemeToggleTile(),
+                if (isOwner) ...[
+                  _Divider(),
+                  _Tile(
+                    title: 'Админ функции',
+                    icon: Icons.admin_panel_settings_rounded,
+                    iconColor: const Color(0xFF7A5A0A),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AdminFunctionsScreen(),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          _MoreTile(
-            title: 'Параметры тела',
-            icon: Icons.monitor_weight_rounded,
-            iconColor: scheme.primary,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const BodyScreen()),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _ThemeToggleTile(),
+
           const SizedBox(height: 12),
-          const DashboardSectionLabel('Социальные функции'),
-          const SizedBox(height: 8),
-          _MoreTile(
-            title: 'Профиль и сообщество',
-            icon: Icons.groups_2_rounded,
-            iconColor: scheme.secondary,
-            onTap: () => widget.onOpenSocialHub(),
-          ),
-          const SizedBox(height: 6),
           Divider(color: scheme.outlineVariant.withValues(alpha: 0.3)),
           const SizedBox(height: 6),
           OutlinedButton.icon(
@@ -168,8 +224,27 @@ class _MoreScreenState extends State<MoreScreen> {
               side: BorderSide(color: scheme.error.withValues(alpha: 0.4)),
             ),
           ),
+          const SizedBox(height: 10),
+          Text(
+            'Сборка: 2026-05-09',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _Divider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 1,
+      indent: 62,
+      color:
+          Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
     );
   }
 }
@@ -199,44 +274,45 @@ class _ThemeToggleTileState extends State<_ThemeToggleTile> {
     final isDark = ThemeNotifier.instance.isDark;
     final scheme = Theme.of(context).colorScheme;
     final accentColor = isDark ? scheme.secondary : const Color(0xFF1A6B75);
+    final isCompact = MediaQuery.of(context).size.width < 420;
 
-    return DashboardCard(
-      padding: EdgeInsets.zero,
-      child: ListTile(
-        minVerticalPadding: 0,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
-        leading: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: accentColor.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(
-            isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-            color: accentColor,
-            size: 20,
-          ),
-        ),
-        title: Text(
-          isDark ? 'Тёмная тема' : 'Светлая тема',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-        ),
-        trailing: Switch(
-          value: !isDark,
-          onChanged: (_) => ThemeNotifier.instance.toggleTheme(),
-          activeThumbColor: accentColor,
-        ),
-        onTap: () => ThemeNotifier.instance.toggleTheme(),
+    return ListTile(
+      minVerticalPadding: 0,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: isCompact ? 0 : 1,
       ),
+      leading: Container(
+        width: isCompact ? 34 : 38,
+        height: isCompact ? 34 : 38,
+        decoration: BoxDecoration(
+          color: accentColor.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(
+          isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+          color: accentColor,
+          size: 20,
+        ),
+      ),
+      title: Text(
+        isDark ? 'Тёмная тема' : 'Светлая тема',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+      ),
+      trailing: Switch(
+        value: !isDark,
+        onChanged: (_) => ThemeNotifier.instance.toggleTheme(),
+        activeThumbColor: accentColor,
+      ),
+      onTap: () => ThemeNotifier.instance.toggleTheme(),
     );
   }
 }
 
-class _MoreTile extends StatelessWidget {
-  const _MoreTile({
+class _Tile extends StatelessWidget {
+  const _Tile({
     required this.title,
     required this.icon,
     required this.onTap,
@@ -252,37 +328,34 @@ class _MoreTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCompact = MediaQuery.of(context).size.width < 420;
 
-    return DashboardCard(
-      padding: EdgeInsets.zero,
-      child: ListTile(
-        minVerticalPadding: 0,
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: isCompact ? 0 : 1,
-        ),
-        leading: Container(
-          width: isCompact ? 34 : 38,
-          height: isCompact ? 34 : 38,
-          decoration: BoxDecoration(
-            color: (iconColor ?? Theme.of(context).colorScheme.secondary)
-                .withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(
-            icon,
-            color: iconColor ?? Theme.of(context).colorScheme.secondary,
-            size: 20,
-          ),
-        ),
-        title: Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: onTap,
+    return ListTile(
+      minVerticalPadding: 0,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: isCompact ? 0 : 1,
       ),
+      leading: Container(
+        width: isCompact ? 34 : 38,
+        height: isCompact ? 34 : 38,
+        decoration: BoxDecoration(
+          color: (iconColor ?? Theme.of(context).colorScheme.secondary)
+              .withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(
+          icon,
+          color: iconColor ?? Theme.of(context).colorScheme.secondary,
+          size: 20,
+        ),
+      ),
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
     );
   }
 }

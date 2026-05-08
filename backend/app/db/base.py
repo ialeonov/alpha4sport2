@@ -11,6 +11,7 @@ from app.models.progression import (
     UserProgression,
 )
 from app.models.user import User
+from app.models.wellness import WellnessEntry
 from app.models.workout import (
     ExerciseCatalog,
     ExerciseSecondaryMuscle,
@@ -24,6 +25,7 @@ from app.models.workout import (
 __all__ = [
     'Base',
     'User',
+    'WellnessEntry',
     'Workout',
     'WorkoutExercise',
     'ExerciseSet',

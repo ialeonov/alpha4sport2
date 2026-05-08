@@ -1,7 +1,10 @@
 from app.models.account_event import AccountEvent
+from app.models.announcement import Announcement
 from app.models.event_like import EventLike
 from app.models.body import BodyEntry
 from app.models.coach import CoachChatMessage
+from app.models.user_profile import UserProfile
+from app.models.wellness import WellnessEntry
 from app.models.progression import (
     ProgressAchievement,
     ProgressExerciseRecord,
@@ -32,7 +35,10 @@ __all__ = [
     'ExerciseSecondaryMuscle',
     'BodyEntry',
     'CoachChatMessage',
+    'UserProfile',
+    'WellnessEntry',
     'AccountEvent',
+    'Announcement',
     'EventLike',
     'UserProgression',
     'ProgressAchievement',

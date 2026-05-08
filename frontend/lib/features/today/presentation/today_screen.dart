@@ -1,5 +1,6 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,8 +10,10 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
-import '../../heatmap/data/muscle_heatmap_asset_loader.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
+import '../../wellness/data/wellness_repository.dart';
+import '../../wellness/domain/wellness_entry.dart';
+import '../../wellness/presentation/wellness_widgets.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -27,6 +30,7 @@ class _TodayScreenState extends State<TodayScreen> {
   _MotivationQuote? _motivationQuote;
   _TodayFocus? _todayFocus;
   _TodaySummary _summary = const _TodaySummary.empty();
+  WellnessEntry? _todayWellness;
   int _weeklyTargetFromProfile = _defaultWeeklyTarget;
   bool _draftLoading = true;
   bool _templatesLoading = false;
@@ -40,11 +44,45 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<void> _refreshScreen() async {
     await Future.wait([
+      _loadTodayWellness(),
       _loadDraft(),
       _loadMotivationQuote(),
       _loadFitnessProfile().then((_) => _loadSummary()),
       _loadTodayFocus(),
     ]);
+  }
+
+  Future<void> _loadTodayWellness() async {
+    final entry = WellnessRepository.loadForDate(DateTime.now());
+    if (mounted) setState(() => _todayWellness = entry);
+    try {
+      final syncedEntry = await WellnessRepository.fetchForDate(DateTime.now());
+      if (mounted) setState(() => _todayWellness = syncedEntry);
+    } catch (_) {
+      // Keep the local cache visible when the server is temporarily unavailable.
+    }
+  }
+
+  List<Map<String, dynamic>> _collectRecentWellnessEntries() {
+    final result = <Map<String, dynamic>>[];
+    final today = DateTime.now();
+    for (var i = 0; i < 7; i++) {
+      final date = today.subtract(Duration(days: i));
+      final entry = WellnessRepository.loadForDate(date);
+      if (entry != null) {
+        final map = <String, dynamic>{
+          'date':
+              DateUtils.dateOnly(entry.date).toIso8601String().substring(0, 10),
+          'sleep': entry.sleep,
+          'energy': entry.energy,
+          'stress': entry.stress,
+          'mood': entry.mood,
+        };
+        if (entry.comment != null) map['comment'] = entry.comment;
+        result.add(map);
+      }
+    }
+    return result;
   }
 
   Future<void> _loadFitnessProfile() async {
@@ -59,9 +97,21 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<void> _loadTodayFocus() async {
     try {
-      final workouts = await _loadWorkoutsForAiCoach();
-      final exerciseCatalog = await _loadExerciseCatalogForAiCoach();
-      final assetData = await const MuscleHeatmapAssetLoader().load();
+      final results = await Future.wait([
+        _loadWorkoutsForAiCoach().catchError((_) => <Map<String, dynamic>>[]),
+        _loadExerciseCatalogForAiCoach()
+            .catchError((_) => <Map<String, dynamic>>[]),
+        BackendApi.getFitnessProfile().catchError((_) => <String, dynamic>{}),
+      ]);
+
+      final workouts = results[0] as List<Map<String, dynamic>>;
+      final exerciseCatalog = results[1] as List<Map<String, dynamic>>;
+      final profile = results[2] as Map<String, dynamic>;
+
+      final goals =
+          ((profile['goals'] as List?)?.cast<String>()) ?? const <String>[];
+      final gender = profile['gender'] as String?;
+
       final now = DateTime.now();
       final weekStart = DateUtils.dateOnly(
         now.subtract(Duration(days: now.weekday - 1)),
@@ -76,24 +126,41 @@ class _TodayScreenState extends State<TodayScreen> {
             startedAt.isBefore(weekEnd);
       }).toList();
 
+      if (!mounted) return;
+
+      if (thisWeek.isEmpty) {
+        final lastWeekStart = weekStart.subtract(const Duration(days: 7));
+        final lastWeekCount = workouts.where((w) {
+          final startedAt =
+              DateTime.tryParse((w['started_at'] ?? '').toString())?.toLocal();
+          return startedAt != null &&
+              !startedAt.isBefore(lastWeekStart) &&
+              startedAt.isBefore(weekStart);
+        }).length;
+
+        final headline = _goalMotivationHeadline(goals);
+        final subtext = lastWeekCount > 0
+            ? 'На прошлой неделе: $lastWeekCount ${_workoutsPlural(lastWeekCount)}'
+            : null;
+
+        setState(() => _todayFocus = _TodayFocus.startOfWeek(
+              motivationHeadline: headline,
+              motivationSubtext: subtext,
+            ));
+        return;
+      }
+
+      final tier1 = _buildTier1Muscles(gender: gender, goals: goals);
+
       final candidateMuscles = <String>{};
       for (final exercise in exerciseCatalog) {
         final primary = (exercise['primary_muscle'] ?? '').toString().trim();
-        if (primary.isNotEmpty && primary != 'кор') {
+        if (primary.isNotEmpty && !_excludedMuscles.contains(primary)) {
           candidateMuscles.add(primary);
         }
       }
 
-      if (candidateMuscles.isEmpty || !mounted) {
-        return;
-      }
-
-      if (thisWeek.isEmpty) {
-        if (mounted) {
-          setState(() => _todayFocus = const _TodayFocus.generic());
-        }
-        return;
-      }
+      if (candidateMuscles.isEmpty || !mounted) return;
 
       final calculator = const MuscleLoadCalculator();
       final rawLoads = calculator.calculateForWorkouts(
@@ -101,48 +168,23 @@ class _TodayScreenState extends State<TodayScreen> {
         exerciseCatalog: exerciseCatalog,
       );
 
-      final underloaded = candidateMuscles.toList()
-        ..sort((a, b) {
-          final byLoad = (rawLoads[a] ?? 0).compareTo(rawLoads[b] ?? 0);
-          if (byLoad != 0) return byLoad;
-          return _muscleLabel(assetData.zoneLabels, a)
-              .compareTo(_muscleLabel(assetData.zoneLabels, b));
-        });
-      final loaded = rawLoads.entries.where((entry) => entry.value > 0).toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
-      // Top-2 loaded muscles as "done" chips
-      final doneChips = loaded
-          .take(2)
-          .map((e) => _MuscleChip(
-                label: _muscleLabel(assetData.zoneLabels, e.key),
-                isDone: true,
-              ))
-          .toList();
-
-      // Top-3 underloaded muscles as "добрать" chips
-      final todoChips = underloaded
-          .take(3)
-          .map((m) => _MuscleChip(
-                label: _muscleLabel(assetData.zoneLabels, m),
-                isDone: false,
-              ))
-          .toList();
-
-      // Derive workout type from top underloaded muscle
-      final topMuscle = underloaded.isNotEmpty ? underloaded.first : null;
-      final (workoutType, emoji) = topMuscle != null
-          ? _muscleToWorkoutType(topMuscle)
-          : ('ТРЕНИРОВКА', '🏋️');
+      final eligibleMuscles =
+          candidateMuscles.where((m) => _muscleTier(m, tier1) <= 3).toList()
+            ..sort((a, b) {
+              final tA = _muscleTier(a, tier1);
+              final tB = _muscleTier(b, tier1);
+              if (tA != tB) return tA.compareTo(tB);
+              return (rawLoads[a] ?? 0).compareTo(rawLoads[b] ?? 0);
+            });
 
       if (!mounted) return;
 
+      final recommendedLabel =
+          _buildRecommendedLabel(eligibleMuscles.take(4).toList());
+
       setState(() {
-        _todayFocus = _TodayFocus(
-          workoutType: workoutType,
-          emoji: emoji,
-          chips: [...doneChips, ...todoChips],
-        );
+        _todayFocus =
+            _TodayFocus.recommendation(recommendedLabel: recommendedLabel);
       });
     } catch (_) {}
   }
@@ -571,6 +613,7 @@ class _TodayScreenState extends State<TodayScreen> {
         minExercises: intensity.minExercises,
         maxExercises: intensity.maxExercises,
         userNotes: userNotes.isEmpty ? null : userNotes,
+        wellnessEntries: _collectRecentWellnessEntries(),
       );
       final reply = (response['reply'] ?? '').toString().trim();
       final plan = _decodeAiCoachWorkoutPlan(reply);
@@ -887,6 +930,12 @@ class _TodayScreenState extends State<TodayScreen> {
                       const SizedBox(height: 10),
                       _WeekSummaryCard(summary: _summary),
                       const SizedBox(height: 10),
+                      WellnessCard(
+                        entry: _todayWellness,
+                        date: DateUtils.dateOnly(DateTime.now()),
+                        onChanged: () => unawaited(_loadTodayWellness()),
+                      ),
+                      const SizedBox(height: 10),
                       if (_draftLoading)
                         const DashboardCard(
                           child: Padding(
@@ -937,36 +986,96 @@ class _TodayScreenState extends State<TodayScreen> {
     return '${date.day} ${months[date.month - 1]}';
   }
 
-  static String _muscleLabel(Map<String, String> labels, String muscle) {
-    final label = labels[muscle];
-    if (label != null && label.isNotEmpty) {
-      return label.toLowerCase();
+  // ── Мышечные тиры ─────────────────────────────────────────────────────────
+
+  static const Set<String> _excludedMuscles = {
+    'предплечья',
+    'кор',
+    'голень',
+  };
+
+  static const Set<String> _tier2Muscles = {
+    'трицепс',
+    'бицепс',
+    'задние_дельты',
+    'трапеции',
+    'пресс',
+  };
+
+  static const Set<String> _tier3Muscles = {'икры'};
+
+  static const Map<String, String> _muscleGroupLabels = {
+    'грудь': 'ГРУДЬ',
+    'широчайшие': 'СПИНА',
+    'трапеции': 'СПИНА',
+    'квадрицепсы': 'НОГИ',
+    'бицепс_бедра': 'НОГИ',
+    'ягодицы': 'НОГИ',
+    'икры': 'НОГИ',
+    'средние_дельты': 'ПЛЕЧИ',
+    'задние_дельты': 'ПЛЕЧИ',
+    'передние_дельты': 'ПЛЕЧИ',
+    'трицепс': 'РУКИ',
+    'бицепс': 'РУКИ',
+    'пресс': 'ПРЕСС',
+  };
+
+  static Set<String> _buildTier1Muscles({
+    String? gender,
+    List<String> goals = const [],
+  }) {
+    final base = <String>{
+      'грудь',
+      'широчайшие',
+      'квадрицепсы',
+      'бицепс_бедра',
+      'ягодицы',
+      'средние_дельты',
+    };
+    if (gender == 'женский' || goals.contains('похудение')) {
+      base.add('пресс');
     }
-    return muscle.toLowerCase();
+    return base;
   }
 
-  static (String, String) _muscleToWorkoutType(String muscle) {
-    const map = <String, (String, String)>{
-      'квадрицепс': ('НОГИ', '🦵'),
-      'бицепс бедра': ('НОГИ', '🦵'),
-      'ягодицы': ('НОГИ', '🦵'),
-      'икры': ('НОГИ', '🦵'),
-      'грудь': ('ГРУДЬ', '💪'),
-      'передние дельты': ('ГРУДЬ И ПЛЕЧИ', '💪'),
-      'плечи': ('ПЛЕЧИ', '🏋️'),
-      'трицепс': ('РУКИ', '💪'),
-      'бицепс': ('РУКИ', '💪'),
-      'широчайшие': ('СПИНА', '🏋️'),
-      'трапеция': ('СПИНА', '🏋️'),
-      'ромбовидные': ('СПИНА', '🏋️'),
-      'задние дельты': ('СПИНА', '🏋️'),
-      'пресс': ('КОР', '🎯'),
-    };
-    final lower = muscle.toLowerCase();
-    for (final entry in map.entries) {
-      if (lower.contains(entry.key)) return entry.value;
+  static int _muscleTier(String muscle, Set<String> tier1) {
+    if (tier1.contains(muscle)) return 1;
+    if (_tier2Muscles.contains(muscle)) return 2;
+    if (_tier3Muscles.contains(muscle)) return 3;
+    return 99;
+  }
+
+  static String _buildRecommendedLabel(List<String> muscles) {
+    final groups = <String>[];
+    final seen = <String>{};
+    for (final muscle in muscles) {
+      final group = _muscleGroupLabels[muscle];
+      if (group != null && seen.add(group)) {
+        groups.add(group);
+        if (groups.length == 2) break;
+      }
     }
-    return ('ТРЕНИРОВКА', '🏋️');
+    return groups.isEmpty ? 'ТРЕНИРОВКА' : groups.join(' И ');
+  }
+
+  // ── Мотивация для старта недели ───────────────────────────────────────────
+
+  static String _goalMotivationHeadline(List<String> goals) {
+    if (goals.contains('масса')) return 'ВРЕМЯ РАСТИ';
+    if (goals.contains('сила')) return 'НЕДЕЛЯ СИЛЫ';
+    if (goals.contains('похудение')) return 'ДВИГАЙСЯ';
+    if (goals.contains('поддержание')) return 'ДЕРЖИ РИТМ';
+    return 'НАЧНИ НЕДЕЛЮ';
+  }
+
+  static String _workoutsPlural(int count) {
+    final mod10 = count % 10;
+    final mod100 = count % 100;
+    if (mod10 == 1 && mod100 != 11) return 'тренировка';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+      return 'тренировки';
+    }
+    return 'тренировок';
   }
 }
 
@@ -980,13 +1089,13 @@ class _WeekSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final today = DateTime.now().weekday;
     final done = summary.weekCount;
     final target = summary.weeklyTarget;
     final remaining = max(0, target - done);
-    final progress = target > 0 ? (done / target).clamp(0.0, 1.0) : 0.0;
     final isComplete = done >= target;
-    final ringColor = isComplete ? scheme.tertiary : scheme.secondary;
+    final accentColor = isComplete ? scheme.tertiary : scheme.secondary;
 
     return DashboardCard(
       padding: const EdgeInsets.all(14),
@@ -998,7 +1107,7 @@ class _WeekSummaryCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── Круговой индикатор ──────────────────────
+          // ── Прогресс-кольцо ─────────────────────────
           SizedBox(
             width: 54,
             height: 54,
@@ -1006,34 +1115,35 @@ class _WeekSummaryCard extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 CircularProgressIndicator(
-                  value: progress,
+                  value: target > 0 ? (done / target).clamp(0.0, 1.0) : 0.0,
                   strokeWidth: 4.5,
-                  backgroundColor:
-                      scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                  color: ringColor,
                   strokeCap: StrokeCap.round,
+                  backgroundColor:
+                      scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  color: accentColor,
                 ),
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       '$done',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            height: 1.0,
-                            color: ringColor,
-                          ),
+                      style: textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        height: 1.0,
+                        color: accentColor,
+                      ),
                     ),
                     Container(
-                        height: 1,
-                        width: 18,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.4)),
+                      height: 1,
+                      width: 18,
+                      color: accentColor.withValues(alpha: 0.4),
+                    ),
                     Text(
                       '$target',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            height: 1.2,
-                          ),
+                      style: textTheme.labelSmall?.copyWith(
+                        color: accentColor.withValues(alpha: 0.8),
+                        height: 1.2,
+                      ),
                     ),
                   ],
                 ),
@@ -1042,91 +1152,76 @@ class _WeekSummaryCard extends StatelessWidget {
           ),
           const SizedBox(width: 14),
 
-          // ── Текст + дни ─────────────────────────────
+          // ── Текст + дни-пиллы ───────────────────────
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   '$done из $target тренировок',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-                if (remaining > 0) ...[
-                  const SizedBox(height: 2),
+                const SizedBox(height: 2),
+                if (remaining > 0)
                   Text(
                     _remainingLabel(remaining, today),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                  ),
-                ] else ...[
-                  const SizedBox(height: 2),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  )
+                else
                   Text(
                     'Цель недели выполнена 🎉',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.tertiary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    style: textTheme.bodySmall?.copyWith(
+                      color: scheme.tertiary,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ],
                 const SizedBox(height: 10),
                 Row(
                   children: List.generate(7, (index) {
                     final weekday = index + 1;
                     final isActive = summary.activeWeekdays.contains(weekday);
                     final isToday = weekday == today;
-                    final isPast = weekday < today;
+
+                    final Color bg;
+                    final Color fg;
+                    if (isActive) {
+                      bg = accentColor;
+                      fg = scheme.onSecondary;
+                    } else if (isToday) {
+                      bg = accentColor.withValues(alpha: 0.18);
+                      fg = accentColor;
+                    } else {
+                      bg = scheme.surfaceContainerHighest
+                          .withValues(alpha: 0.28);
+                      fg = scheme.onSurfaceVariant.withValues(alpha: 0.5);
+                    }
 
                     return Expanded(
-                      child: Column(
-                        children: [
-                          Text(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: bg,
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
                             _dayLabels[index],
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
-                                ?.copyWith(
-                                  fontSize: 10,
-                                  color: isToday
-                                      ? scheme.secondary
-                                      : scheme.onSurfaceVariant
-                                          .withValues(alpha: 0.6),
-                                  fontWeight: isToday
-                                      ? FontWeight.w800
-                                      : FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(height: 5),
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            width: isActive ? 24 : 20,
-                            height: isActive ? 24 : 20,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: isActive
-                                  ? scheme.secondary
-                                  : isToday
-                                      ? scheme.secondary.withValues(alpha: 0.15)
-                                      : isPast
-                                          ? scheme.surfaceContainerHighest
-                                              .withValues(alpha: 0.4)
-                                          : Colors.transparent,
-                              border: isToday && !isActive
-                                  ? Border.all(
-                                      color: scheme.secondary
-                                          .withValues(alpha: 0.5),
-                                      width: 1.5,
-                                    )
-                                  : null,
+                            style: textTheme.labelSmall?.copyWith(
+                              fontSize: 10,
+                              fontWeight: isActive || isToday
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: fg,
                             ),
-                            child: isActive
-                                ? Icon(Icons.check_rounded,
-                                    size: 13, color: scheme.onSecondary)
-                                : null,
                           ),
-                        ],
+                        ),
                       ),
                     );
                   }),
@@ -1171,7 +1266,6 @@ class _WorkoutDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasFocus = focus != null && focus!.workoutType != 'СТАРТ';
 
     return DashboardCard(
       color: Color.alphaBlend(
@@ -1182,10 +1276,10 @@ class _WorkoutDayCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Фокус ─────────────────────────────────────
-          if (focus != null) ...[
+          if (focus != null && !focus!.isStartState) ...[
+            // ── Рекомендация на основе нагрузки ──────────
             Text(
-              'ТРЕНИРОВКА ДНЯ',
+              'РЕКОМЕНДУЕМ',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
                     fontWeight: FontWeight.w700,
@@ -1194,27 +1288,38 @@ class _WorkoutDayCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${focus!.workoutType} ${focus!.emoji}',
+              focus!.recommendedLabel!,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    height: 1.1,
+                    fontFamily: 'Bebas Neue Cyrillic',
+                    fontSize: 32,
+                    letterSpacing: 1.0,
+                    height: 1.0,
                   ),
             ),
             const SizedBox(height: 14),
+          ] else if (focus != null && focus!.isStartState) ...[
+            // ── Старт недели ──────────────────────────────
+            Text(
+              focus!.motivationHeadline!,
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontFamily: 'Bebas Neue Cyrillic',
+                    fontSize: 32,
+                    letterSpacing: 1.0,
+                    height: 1.0,
+                  ),
+            ),
+            if (focus!.motivationSubtext != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                focus!.motivationSubtext!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+            const SizedBox(height: 14),
           ] else ...[
             const SizedBox(height: 4),
-          ],
-
-          // ── Кнопки ────────────────────────────────────
-          if (!hasFocus) ...[
-            Text(
-              'Новая тренировка',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
           ],
           Row(
             children: [
@@ -1235,9 +1340,7 @@ class _WorkoutDayCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _IconActionButton(
-                icon: templatesLoading
-                    ? null
-                    : Icons.library_books_outlined,
+                icon: templatesLoading ? null : Icons.library_books_outlined,
                 loading: templatesLoading,
                 tooltip: 'Шаблон',
                 onTap: templatesLoading ? null : onStartTemplate,
@@ -1282,8 +1385,8 @@ class _IconActionButton extends StatelessWidget {
           width: 46,
           height: 46,
           decoration: BoxDecoration(
-            border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.5)),
+            border:
+                Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Center(
@@ -1641,29 +1744,22 @@ class _TodaySummary {
   final Set<int> activeWeekdays; // 1=Mon .. 7=Sun
 }
 
-class _MuscleChip {
-  const _MuscleChip({required this.label, required this.isDone});
-  final String label;
-  final bool isDone; // true = уже нагружена, false = добрать
-}
-
 class _TodayFocus {
-  const _TodayFocus({
-    required this.workoutType,
-    required this.emoji,
-    required this.chips,
-  });
+  const _TodayFocus.startOfWeek({
+    required this.motivationHeadline,
+    this.motivationSubtext,
+  }) : recommendedLabel = null;
 
-  const _TodayFocus.generic()
-      : workoutType = 'СТАРТ',
-        emoji = '🏋️',
-        chips = const [];
+  const _TodayFocus.recommendation({required String this.recommendedLabel})
+      : motivationHeadline = null,
+        motivationSubtext = null;
 
-  final String workoutType;
-  final String emoji;
-  final List<_MuscleChip> chips;
+  final String? recommendedLabel;
+  final String? motivationHeadline;
+  final String? motivationSubtext;
+
+  bool get isStartState => recommendedLabel == null;
 }
-
 
 class _TodayQuote extends StatelessWidget {
   const _TodayQuote({

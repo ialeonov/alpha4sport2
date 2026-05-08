@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/network/backend_api.dart';
-import '../../../core/storage/local_cache.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 
@@ -105,41 +104,11 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
     super.dispose();
   }
 
-  Future<List<Map<String, dynamic>>> _loadTemplates() async {
-    try {
-      return await BackendApi.getTemplates();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.templatesCache);
-      if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
-      }
-      rethrow;
-    }
-  }
+  Future<List<Map<String, dynamic>>> _loadTemplates() => BackendApi.getTemplates();
 
-  Future<List<Map<String, dynamic>>> _loadCatalog() async {
-    try {
-      return await BackendApi.getExercises();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
-      if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
-      }
-      rethrow;
-    }
-  }
+  Future<List<Map<String, dynamic>>> _loadCatalog() => BackendApi.getExercises();
 
-  Future<List<Map<String, dynamic>>> _loadWorkouts() async {
-    try {
-      return await BackendApi.getWorkouts();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
-      if (cached != null) {
-        return cached.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
-      }
-      rethrow;
-    }
-  }
+  Future<List<Map<String, dynamic>>> _loadWorkouts() => BackendApi.getWorkouts();
 
   Future<void> _refreshData() async {
     setState(() {

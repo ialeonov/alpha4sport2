@@ -25,8 +25,13 @@ class ProgressionController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = await BackendApi.getProgressionProfile();
-      _profile = ProgressionProfileData.fromJson(data);
+      final results = await Future.wait([
+        BackendApi.getProgressionProfile(),
+        BackendApi.getWorkouts().catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+      _profile = ProgressionProfileData.fromJson(
+        results[0] as Map<String, dynamic>,
+      );
     } catch (error) {
       _error = BackendApi.describeError(
         error,

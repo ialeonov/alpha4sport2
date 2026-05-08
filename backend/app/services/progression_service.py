@@ -51,6 +51,7 @@ _LEGACY_XP = {
     'workout_volume_bonus_20': 15,
     'pr_weight': 15,
     'pr_1rm': 20,
+    'pr_reps': 12,
     'pr_volume': 10,
     'good_week': 0,
     'ideal_week': 30,
@@ -70,6 +71,7 @@ _REBALANCED_XP = {
     'workout_volume_bonus_20': 0,
     'pr_weight': 8,
     'pr_1rm': 10,
+    'pr_reps': 7,
     'pr_volume': 6,
     'good_week': 15,
     'ideal_week': 30,
@@ -107,6 +109,7 @@ class RecordEventData:
     record_type: str
     value: float
     achieved_at: datetime
+    extra_value: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,8 @@ class ExerciseRecordSnapshot:
     best_weight: float
     best_1rm: float
     best_volume: float
+    best_reps: int
+    best_reps_weight: float
     updated_at: datetime
 
 
@@ -228,6 +233,8 @@ class ProgressionService:
                     best_weight=snapshot.best_weight,
                     best_1rm=snapshot.best_1rm,
                     best_volume=snapshot.best_volume,
+                    best_reps=snapshot.best_reps,
+                    best_reps_weight=snapshot.best_reps_weight,
                     updated_at=snapshot.updated_at,
                 )
             )
@@ -347,7 +354,7 @@ class ProgressionService:
             name_part = f' "{weekly.workout_name}"' if weekly.workout_name else ''
             events.log_once(
                 user_id=user_id,
-                event_key=f'weekly_workout:{weekly.week_key}:{weekly.count}',
+                event_key=f'weekly_workout:{user_id}:{weekly.week_key}:{weekly.count}',
                 event_type='weekly_workout',
                 description=f'Завершил {ordinal} тренировку на неделе{name_part}.',
                 created_at=now,
@@ -363,9 +370,14 @@ class ProgressionService:
             )
 
         for record in record_events:
-            if record.record_type == 'pr_volume':
+            if record.record_type in ('pr_volume', 'reps'):
                 continue
-            value_str = f'{record.value:g} кг'
+            if record.record_type == 'reps':
+                reps = int(record.value)
+                weight_part = f' ({record.extra_value:g} кг)' if record.extra_value > 0 else ''
+                value_str = f'{reps} раз{weight_part}'
+            else:
+                value_str = f'{record.value:g} кг'
             events.log_once(
                 user_id=user_id,
                 event_key=f'record:{record.workout_id}:{record.exercise_key}:{record.record_type}',
@@ -622,6 +634,7 @@ class _ProgressionCalculator:
             previous_weight = previous.best_weight if previous else 0
             previous_1rm = previous.best_1rm if previous else 0
             previous_volume = previous.best_volume if previous else 0
+            previous_reps = previous.best_reps if previous else 0
 
             best_weight = max(float(set_item.weight or 0) for set_item in valid_sets)
             best_1rm = max(
@@ -629,6 +642,13 @@ class _ProgressionCalculator:
                 for set_item in valid_sets
             )
             best_volume = sum(float(set_item.weight or 0) * set_item.reps for set_item in valid_sets)
+
+            # Рекорд повторений считается только с рекордным весом
+            new_best_weight = max(previous_weight, best_weight)
+            sets_at_record_weight = [
+                s for s in valid_sets if float(s.weight or 0) == new_best_weight
+            ]
+            reps_at_record_weight = max((s.reps for s in sets_at_record_weight), default=0)
 
             if best_weight > previous_weight:
                 count += 1
@@ -670,13 +690,30 @@ class _ProgressionCalculator:
                     )
                 )
 
+            # pr_reps: отслеживаем рекорд повторений с рекордным весом (без XP и ленты)
+            if reps_at_record_weight > previous_reps:
+                self.record_events.append(
+                    RecordEventData(
+                        workout_id=workout.id,
+                        exercise_key=exercise_key,
+                        exercise_name=exercise.exercise_name,
+                        record_type='reps',
+                        value=reps_at_record_weight,
+                        extra_value=new_best_weight,
+                        achieved_at=performed_at,
+                    )
+                )
+
+            new_best_reps = reps_at_record_weight if best_weight >= previous_weight else previous_reps
             self.exercise_records[exercise_key] = ExerciseRecordSnapshot(
                 exercise_key=exercise_key,
                 catalog_exercise_id=exercise.catalog_exercise_id,
                 exercise_name=exercise.exercise_name,
-                best_weight=max(previous_weight, best_weight),
+                best_weight=new_best_weight,
                 best_1rm=max(previous_1rm, best_1rm),
                 best_volume=max(previous_volume, best_volume),
+                best_reps=new_best_reps,
+                best_reps_weight=new_best_weight,
                 updated_at=performed_at,
             )
         return count
@@ -956,7 +993,11 @@ class _ProgressionCalculator:
 
 
 def _is_working_set(set_item: ExerciseSet) -> bool:
-    return set_item.reps > 0 and (set_item.weight or 0) > 0
+    return (
+        getattr(set_item, 'set_type', 'work') != 'warmup'
+        and set_item.reps > 0
+        and (set_item.weight or 0) > 0
+    )
 
 
 def _exercise_key(exercise: WorkoutExercise) -> str:
@@ -984,6 +1025,8 @@ def _serialize_exercise_record(item: ExerciseRecordSnapshot) -> dict:
         'bestWeight': round(item.best_weight, 2),
         'best1rm': round(item.best_1rm, 2),
         'bestVolume': round(item.best_volume, 2),
+        'bestReps': item.best_reps,
+        'bestRepsWeight': round(item.best_reps_weight, 2),
         'updatedAt': item.updated_at.isoformat(),
     }
 
@@ -1043,6 +1086,7 @@ def _record_label(record_type: str) -> str:
         'weight': 'Рекорд веса',
         '1rm': 'Рекорд 1ПМ',
         'volume': 'Рекорд объёма',
+        'reps': 'Рекорд повторений',
     }.get(record_type, record_type)
 
 

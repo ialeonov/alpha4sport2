@@ -1,30 +1,62 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../../core/network/backend_api.dart';
+import '../../../core/network/backend_api_exception.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../wellness/data/wellness_repository.dart';
 
 class AiCoachScreen extends StatefulWidget {
-  const AiCoachScreen({super.key});
+  const AiCoachScreen({super.key, this.initialMessage});
+
+  final String? initialMessage;
 
   @override
   State<AiCoachScreen> createState() => _AiCoachScreenState();
 }
 
 class _AiCoachScreenState extends State<AiCoachScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('AI-коуч')),
+      body: AiCoachChat(initialMessage: widget.initialMessage),
+    );
+  }
+}
+
+class AiCoachChat extends StatefulWidget {
+  const AiCoachChat({
+    super.key,
+    this.initialMessage,
+    this.wrapInBackdrop = true,
+  });
+
+  final String? initialMessage;
+  final bool wrapInBackdrop;
+
+  @override
+  State<AiCoachChat> createState() => _AiCoachChatState();
+}
+
+class _AiCoachChatState extends State<AiCoachChat>
+    with AutomaticKeepAliveClientMixin {
   static const _maxMessagesForRequest = 12;
-  final List<_ChatMessage> _messages = [];
+  final List<_ChatMessage> _messages = [_introMessage];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  bool _isLoadingHistory = true;
   bool _isSending = false;
+  bool _showPrompts = false;
   bool _showJumpUp = false;
   bool _showJumpDown = false;
   int _sendingMessageIndex = 0;
   Timer? _sendingMessageTimer;
+  String _streamingText = '';
+  StreamSubscription<String>? _streamSubscription;
 
   static const _sendingMessages = [
     'Анализирую тренировки...',
@@ -35,29 +67,43 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   ];
 
   static const _starterPrompts = [
-    'Разбери мои последние тренировки',
-    'Какие мышцы я давно не тренировал?',
-    'Спланируй тренировку на сегодня',
-    'Как распределена нагрузка по мышцам?',
+    'Разбери последнюю тренировку',
+    'Как мой прогресс?',
+    'Составь план тренировки на сегодня',
+    'Какие мышцы давно не работали?',
+    'Как пробить застой?',
+    'Добавить вес или повторения?',
   ];
 
   static const _introMessage = _ChatMessage(
     role: 'assistant',
     text:
-        'Я уже вижу твою статистику по тренировкам. Можешь попросить меня разобрать прогресс, нагрузку или восстановление.',
+        'Привет! Я твой AI-коуч. Спроси меня о тренировках или нажми 💡 для подсказок.',
     includeInRequest: false,
   );
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScrollChanged);
     _loadHistory();
+    final initialMessage = widget.initialMessage?.trim();
+    if (initialMessage != null && initialMessage.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _sendMessage(initialMessage);
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
     _sendingMessageTimer?.cancel();
+    _streamSubscription?.cancel();
     _scrollController.removeListener(_handleScrollChanged);
     _controller.dispose();
     _scrollController.dispose();
@@ -65,16 +111,42 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   }
 
   Future<void> _loadHistory() async {
-    await _syncHistory(showLoading: true);
+    await _syncHistory();
   }
 
-  Future<void> _syncHistory({bool showLoading = false}) async {
-    if (showLoading && mounted) {
-      setState(() => _isLoadingHistory = true);
+  List<Map<String, dynamic>> _collectRecentWellnessEntries() {
+    final result = <Map<String, dynamic>>[];
+    final today = DateTime.now();
+    for (var i = 0; i < 7; i++) {
+      final date = today.subtract(Duration(days: i));
+      final entry = WellnessRepository.loadForDate(date);
+      if (entry != null) {
+        final map = <String, dynamic>{
+          'date':
+              DateUtils.dateOnly(entry.date).toIso8601String().substring(0, 10),
+          'sleep': entry.sleep,
+          'energy': entry.energy,
+          'stress': entry.stress,
+          'mood': entry.mood,
+        };
+        if (entry.comment != null) map['comment'] = entry.comment;
+        result.add(map);
+      }
     }
+    return result;
+  }
+
+  Future<void> _syncHistory({
+    bool force = false,
+  }) async {
     try {
       final history = await BackendApi.getCoachHistory();
       if (!mounted) return;
+      if (!force &&
+          _messages
+              .any((message) => message.id == null && message.role == 'user')) {
+        return;
+      }
       setState(() {
         _messages
           ..clear()
@@ -98,7 +170,6 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoadingHistory = false);
         _scrollToBottom();
       }
     }
@@ -106,13 +177,39 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
 
   Future<void> _sendMessage([String? preset]) async {
     final text = (preset ?? _controller.text).trim();
-    if (text.isEmpty || _isSending || _isLoadingHistory) {
+    if (text.isEmpty || _isSending) {
+      return;
+    }
+
+    final clarification = _exerciseClarificationFor(text);
+    if (clarification != null) {
+      setState(() {
+        if (_messages.length == 1 &&
+            !_messages.first.includeInRequest &&
+            _messages.first.id == null) {
+          _messages.clear();
+        }
+        _messages.add(_ChatMessage(role: 'user', text: text));
+        _messages.add(_ChatMessage(role: 'assistant', text: clarification));
+        _showPrompts = false;
+        if (preset == null) {
+          _controller.clear();
+        }
+      });
+      _scrollToBottom();
       return;
     }
 
     setState(() {
+      if (_messages.length == 1 &&
+          !_messages.first.includeInRequest &&
+          _messages.first.id == null) {
+        _messages.clear();
+      }
       _messages.add(_ChatMessage(role: 'user', text: text));
       _isSending = true;
+      _streamingText = '';
+      _showPrompts = false;
       _sendingMessageIndex = 0;
       if (preset == null) {
         _controller.clear();
@@ -132,60 +229,87 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
     );
     _scrollToBottom();
 
-    try {
-      final requestMessages = _messages
-          .where((message) => !message.isError && message.includeInRequest)
-          .toList();
-      final response = await BackendApi.chatWithCoach(
-        messages: requestMessages
-            .skip(
-              requestMessages.length > _maxMessagesForRequest
-                  ? requestMessages.length - _maxMessagesForRequest
-                  : 0,
-            )
-            .map(
-              (message) => {
-                'role': message.role,
-                'content': message.text,
-              },
-            )
-            .toList(),
-      );
-      final reply = (response['reply'] as String?)?.trim();
-      if (!mounted) return;
-      setState(() {
-        _messages.add(
-          _ChatMessage(
-            role: 'assistant',
-            text: (reply == null || reply.isEmpty)
-                ? 'Не удалось получить содержательный ответ. Попробуй уточнить запрос.'
-                : reply,
-          ),
-        );
-      });
-      await _syncHistory();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _messages.add(
-          _ChatMessage(
-            role: 'assistant',
-            text: BackendApi.describeError(
-              error,
-              fallback: 'AI - коуч сейчас недоступен. Попробуй чуть позже.',
-            ),
-            isError: true,
-          ),
-        );
-      });
-    } finally {
-      _sendingMessageTimer?.cancel();
-      _sendingMessageTimer = null;
-      if (mounted) {
-        setState(() => _isSending = false);
+    final requestMessages = _messages
+        .where((message) => !message.isError && message.includeInRequest)
+        .toList();
+    final apiMessages = requestMessages
+        .skip(
+          requestMessages.length > _maxMessagesForRequest
+              ? requestMessages.length - _maxMessagesForRequest
+              : 0,
+        )
+        .map((message) => {'role': message.role, 'content': message.text})
+        .toList();
+    final wellness = _collectRecentWellnessEntries();
+
+    String accumulated = '';
+    bool hadError = false;
+
+    final stream = BackendApi.chatWithCoachStream(
+      messages: apiMessages,
+      wellnessEntries: wellness,
+    );
+
+    _streamSubscription?.cancel();
+    _streamSubscription = stream.listen(
+      (chunk) {
+        if (!mounted) return;
+        accumulated += chunk;
+        setState(() => _streamingText = accumulated);
         _scrollToBottom();
-      }
-    }
+      },
+      onError: (error) {
+        if (!mounted) return;
+        hadError = true;
+        final errorText = error is BackendApiException
+            ? error.message
+            : 'Временные проблемы со связью. Попробуй чуть позже.';
+        setState(() {
+          _messages.add(
+            _ChatMessage(
+              role: 'assistant',
+              text: errorText,
+              isError: true,
+            ),
+          );
+          _isSending = false;
+          _streamingText = '';
+        });
+        _sendingMessageTimer?.cancel();
+        _sendingMessageTimer = null;
+        _scrollToBottom();
+      },
+      onDone: () {
+        if (!mounted || hadError) return;
+        final reply = accumulated.trim();
+        setState(() {
+          _messages.add(
+            _ChatMessage(
+              role: 'assistant',
+              text: reply.isEmpty
+                  ? 'Не удалось получить содержательный ответ. Попробуй уточнить запрос.'
+                  : reply,
+            ),
+          );
+          _isSending = false;
+          _streamingText = '';
+        });
+        _sendingMessageTimer?.cancel();
+        _sendingMessageTimer = null;
+        _scrollToBottom();
+        _syncHistory(force: true);
+      },
+    );
+  }
+
+  String? _exerciseClarificationFor(String text) {
+    return switch (text) {
+      'Как пробить застой?' =>
+        'Про какое упражнение говорим? Напиши название, и я разберу, что лучше поменять.',
+      'Добавить вес или повторения?' =>
+        'Для какого упражнения решить: добавить вес или повторения?',
+      _ => null,
+    };
   }
 
   bool get _hasHistory => _messages.any((m) => m.id != null);
@@ -218,6 +342,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
       setState(() {
         _messages.clear();
         _messages.add(_introMessage);
+        _showPrompts = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('История очищена.')),
@@ -234,6 +359,17 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
           ),
         ),
       );
+    }
+  }
+
+  void _togglePrompts() {
+    FocusScope.of(context).unfocus();
+    setState(() => _showPrompts = !_showPrompts);
+  }
+
+  void _hidePrompts() {
+    if (_showPrompts) {
+      setState(() => _showPrompts = false);
     }
   }
 
@@ -278,94 +414,44 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AI - коуч'),
-        actions: [
-          if (_hasHistory)
-            IconButton(
-              icon: const Icon(Icons.delete_sweep_rounded),
-              tooltip: 'Очистить историю',
-              onPressed: _isSending ? null : _clearHistory,
-            ),
-        ],
-      ),
-      body: AppBackdrop(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    ListView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                      children: [
-                        DashboardSummaryCard(
-                          title: 'Тренер, который отвечает по твоим данным',
-                          subtitle: 'Контекст берется из последних тренировок',
-                          bottom: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _starterPrompts
-                                .map(
-                                  (prompt) => ActionChip(
-                                    label: Text(prompt),
-                                    onPressed: _isSending || _isLoadingHistory
-                                        ? null
-                                        : () => _sendMessage(prompt),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const DashboardSectionLabel('Чат'),
-                        const SizedBox(height: 10),
-                        if (_isLoadingHistory)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 10),
-                            child: DashboardCard(
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2.2),
-                                  ),
-                                  SizedBox(width: 12),
-                                  Expanded(
-                                    child:
-                                        Text('Загружаю последние сообщения...'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ..._messages.asMap().entries.map(
-                          (entry) {
-                            final idx = entry.key;
-                            final message = entry.value;
+    final content = SafeArea(
+      top: false,
+      child: Column(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _hidePrompts,
+              child: Stack(
+                children: [
+                  ListView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                    children: [
+                      ..._messages.asMap().entries.map(
+                        (entry) {
+                          final idx = entry.key;
+                          final message = entry.value;
 
-                            // Find the paired message to delete together
-                            _ChatMessage? partner;
-                            if (message.role == 'user' &&
-                                idx + 1 < _messages.length) {
-                              final next = _messages[idx + 1];
-                              if (next.role == 'assistant' && next.id != null) {
-                                partner = next;
-                              }
-                            } else if (message.role == 'assistant' && idx > 0) {
-                              final prev = _messages[idx - 1];
-                              if (prev.role == 'user' && prev.id != null) {
-                                partner = prev;
-                              }
+                          // Find the paired message to delete together
+                          _ChatMessage? partner;
+                          if (message.role == 'user' &&
+                              idx + 1 < _messages.length) {
+                            final next = _messages[idx + 1];
+                            if (next.role == 'assistant' && next.id != null) {
+                              partner = next;
                             }
+                          } else if (message.role == 'assistant' && idx > 0) {
+                            final prev = _messages[idx - 1];
+                            if (prev.role == 'user' && prev.id != null) {
+                              partner = prev;
+                            }
+                          }
 
-                            return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
                             child: Dismissible(
                               key: ValueKey(
                                 message.id ??
@@ -472,13 +558,26 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
                                   );
                                 },
                               ),
-                              child: _ChatBubble(message: message),
+                              child: _ChatBubble(
+                                message: message,
+                                onEdit: message.role == 'user'
+                                    ? () {
+                                        _controller.text = message.text;
+                                        _controller.selection =
+                                            TextSelection.collapsed(
+                                          offset: message.text.length,
+                                        );
+                                      }
+                                    : null,
+                              ),
                             ),
                           );
-                          },
-                        ),
-                        if (_isSending)
-                          DashboardCard(
+                        },
+                      ),
+                      if (_isSending && _streamingText.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: DashboardCard(
                             color: scheme.surfaceContainerHighest
                                 .withValues(alpha: 0.55),
                             child: Row(
@@ -487,8 +586,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: AnimatedSwitcher(
-                                    duration:
-                                        const Duration(milliseconds: 300),
+                                    duration: const Duration(milliseconds: 300),
                                     child: Text(
                                       _sendingMessages[_sendingMessageIndex],
                                       key: ValueKey(_sendingMessageIndex),
@@ -501,59 +599,102 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
                               ],
                             ),
                           ),
-                      ],
-                    ),
+                        )
+                      else if (_isSending && _streamingText.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _ChatBubble(
+                            message: _ChatMessage(
+                              role: 'assistant',
+                              text: _streamingText,
+                            ),
+                            isStreaming: true,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_hasHistory)
                     Positioned(
-                      right: 16,
-                      bottom: 16,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          if (_showJumpUp)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _ScrollActionButton(
-                                icon: Icons.keyboard_double_arrow_up_rounded,
-                                tooltip: 'Наверх',
-                                onTap: _scrollToTop,
-                              ),
-                            ),
-                          if (_showJumpDown)
-                            _ScrollActionButton(
-                              icon: Icons.keyboard_double_arrow_down_rounded,
-                              tooltip: 'Вниз',
-                              onTap: _scrollToBottom,
-                            ),
-                        ],
+                      top: 6,
+                      right: 12,
+                      child: IconButton(
+                        icon: const Icon(Icons.delete_sweep_rounded),
+                        tooltip: 'Очистить историю',
+                        onPressed: _isSending ? null : _clearHistory,
                       ),
                     ),
-                  ],
-                ),
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (_showJumpUp)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _ScrollActionButton(
+                              icon: Icons.keyboard_double_arrow_up_rounded,
+                              tooltip: 'Наверх',
+                              onTap: _scrollToTop,
+                            ),
+                          ),
+                        if (_showJumpDown)
+                          _ScrollActionButton(
+                            icon: Icons.keyboard_double_arrow_down_rounded,
+                            tooltip: 'Вниз',
+                            onTap: _scrollToBottom,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              _CoachComposer(
-                controller: _controller,
-                isSending: _isSending || _isLoadingHistory,
-                onSend: () => _sendMessage(),
-              ),
-            ],
+            ),
           ),
-        ),
+          _CoachComposer(
+            controller: _controller,
+            prompts: _starterPrompts,
+            showPrompts: _showPrompts,
+            isSending: _isSending,
+            onPromptToggle: _togglePrompts,
+            onPromptSelected: _sendMessage,
+            onSend: () => _sendMessage(),
+          ),
+        ],
       ),
     );
+    if (!widget.wrapInBackdrop) {
+      return content;
+    }
+    return AppBackdrop(child: content);
   }
 }
 
-class _CoachComposer extends StatelessWidget {
+class _CoachComposer extends StatefulWidget {
   const _CoachComposer({
     required this.controller,
+    required this.prompts,
+    required this.showPrompts,
     required this.isSending,
+    required this.onPromptToggle,
+    required this.onPromptSelected,
     required this.onSend,
   });
 
   final TextEditingController controller;
+  final List<String> prompts;
+  final bool showPrompts;
   final bool isSending;
+  final VoidCallback onPromptToggle;
+  final ValueChanged<String> onPromptSelected;
   final VoidCallback onSend;
 
+  @override
+  State<_CoachComposer> createState() => _CoachComposerState();
+}
+
+class _CoachComposerState extends State<_CoachComposer>
+    with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -561,38 +702,140 @@ class _CoachComposer extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: DashboardCard(
-          borderRadius: 24,
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    isDense: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.bottomCenter,
+              child: widget.showPrompts
+                  ? _PromptPanel(
+                      prompts: widget.prompts,
+                      onSelected:
+                          widget.isSending ? null : widget.onPromptSelected,
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+            DashboardCard(
+              borderRadius: 24,
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    tooltip: 'Подсказки',
+                    onPressed: widget.isSending ? null : widget.onPromptToggle,
+                    icon: Icon(
+                      widget.showPrompts
+                          ? Icons.lightbulb_rounded
+                          : Icons.lightbulb_outline_rounded,
+                      color: scheme.primary,
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: isSending ? null : onSend,
-                style: FilledButton.styleFrom(
-                  backgroundColor: scheme.primary,
-                  minimumSize: const Size(52, 52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
+                  Expanded(
+                    child: TextField(
+                      controller: widget.controller,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => widget.onSend(),
+                      decoration: const InputDecoration(
+                        hintText: 'Спроси коуча...',
+                        border: InputBorder.none,
+                        isDense: true,
+                      ),
+                    ),
                   ),
-                ),
-                child: const Icon(Icons.arrow_upward_rounded),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: widget.isSending ? null : widget.onSend,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: scheme.primary,
+                      minimumSize: const Size(52, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Icon(Icons.arrow_upward_rounded),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PromptPanel extends StatelessWidget {
+  const _PromptPanel({
+    required this.prompts,
+    required this.onSelected,
+  });
+
+  final List<String> prompts;
+  final ValueChanged<String>? onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DashboardCard(
+        borderRadius: 22,
+        padding: const EdgeInsets.all(10),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.70),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 220),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: prompts
+                  .map(
+                    (prompt) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: onSelected == null
+                            ? null
+                            : () => onSelected!(prompt),
+                        child: Container(
+                          width: double.infinity,
+                          constraints: const BoxConstraints(minHeight: 42),
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.surface.withValues(alpha: 0.48),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color:
+                                  scheme.outlineVariant.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Text(
+                            prompt,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.18,
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
           ),
         ),
       ),
@@ -601,9 +844,15 @@ class _CoachComposer extends StatelessWidget {
 }
 
 class _ChatBubble extends StatelessWidget {
-  const _ChatBubble({required this.message});
+  const _ChatBubble({
+    required this.message,
+    this.onEdit,
+    this.isStreaming = false,
+  });
 
   final _ChatMessage message;
+  final VoidCallback? onEdit;
+  final bool isStreaming;
 
   @override
   Widget build(BuildContext context) {
@@ -612,6 +861,8 @@ class _ChatBubble extends StatelessWidget {
     final accent = message.isError
         ? scheme.error
         : (isUser ? scheme.primary : scheme.secondary);
+    final bodyStyle =
+        Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45);
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -625,46 +876,96 @@ class _ChatBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                isUser ? 'Ты' : 'AI - коуч',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: accent,
+              Row(
+                children: [
+                  Text(
+                    isUser ? 'Ты' : 'AI-коуч',
+                    style:
+                        Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: accent,
+                            ),
+                  ),
+                  const Spacer(),
+                  if (!isStreaming) ...[
+                    _BubbleAction(
+                      icon: Icons.copy_rounded,
+                      tooltip: 'Копировать',
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+                      onTap: () {
+                        Clipboard.setData(
+                            ClipboardData(text: message.text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Скопировано'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
                     ),
+                    if (onEdit != null) ...[
+                      const SizedBox(width: 2),
+                      _BubbleAction(
+                        icon: Icons.edit_rounded,
+                        tooltip: 'Редактировать',
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+                        onTap: onEdit!,
+                      ),
+                    ],
+                  ],
+                ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               if (isUser || message.isError)
                 SelectableText(
                   message.text,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyLarge
-                      ?.copyWith(height: 1.5),
+                  style: bodyStyle,
                 )
               else
                 MarkdownBody(
                   data: _normalizeMarkdown(message.text),
-                  selectable: true,
-                  styleSheet:
-                      MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                    p: Theme.of(context)
-                        .textTheme
-                        .bodyLarge
-                        ?.copyWith(height: 1.5),
-                    pPadding: const EdgeInsets.only(bottom: 10),
-                    listBullet: Theme.of(context)
-                        .textTheme
-                        .bodyLarge
-                        ?.copyWith(height: 1.5),
-                    listBulletPadding: const EdgeInsets.only(right: 8),
-                    strong: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          height: 1.5,
-                          fontWeight: FontWeight.w800,
-                        ),
+                  selectable: !isStreaming,
+                  styleSheet: MarkdownStyleSheet.fromTheme(
+                          Theme.of(context))
+                      .copyWith(
+                    p: bodyStyle,
+                    pPadding: const EdgeInsets.only(bottom: 8),
+                    listBullet: bodyStyle,
+                    listBulletPadding: const EdgeInsets.only(right: 6),
+                    strong: bodyStyle?.copyWith(fontWeight: FontWeight.w800),
                   ),
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BubbleAction extends StatelessWidget {
+  const _BubbleAction({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(icon, size: 15, color: color),
         ),
       ),
     );

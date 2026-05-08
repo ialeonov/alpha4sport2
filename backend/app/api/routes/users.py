@@ -2,20 +2,29 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.account import PublicUserSummary, UpdateDisplayNameRequest
+from app.models.user_profile import UserProfile
+from app.schemas.account import FitnessProfileOut, FitnessProfileUpdate, PublicUserSummary, UpdateDisplayNameRequest
 from app.schemas.auth import UserOut
 from app.services.account_event_service import AccountEventService, avatar_url_for_user, display_name_for_user
 
 router = APIRouter()
 
 _ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
+_VALID_GOALS = {'масса', 'сила', 'похудение', 'поддержание'}
 _MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024
+
+
+def _parse_goals(raw: str | None) -> list:
+    if not raw:
+        return []
+    return [goal for goal in raw.split(',') if goal in _VALID_GOALS]
 
 
 @router.get('', response_model=list[PublicUserSummary])
@@ -64,6 +73,49 @@ async def upload_avatar(
         'display_name': display_name_for_user(current_user),
         'avatar_url': avatar_url_for_user(current_user),
     }
+
+
+@router.get('/me/fitness-profile', response_model=FitnessProfileOut)
+def get_fitness_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == current_user.id))
+    if profile is None:
+        return FitnessProfileOut()
+    return FitnessProfileOut(
+        goals=_parse_goals(profile.goal),
+        experience=profile.experience,
+        gender=profile.gender,
+        injuries=profile.injuries,
+        daysPerWeek=profile.days_per_week,
+    )
+
+
+@router.put('/me/fitness-profile', response_model=FitnessProfileOut)
+def update_fitness_profile(
+    payload: FitnessProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == current_user.id))
+    if profile is None:
+        profile = UserProfile(user_id=current_user.id)
+        db.add(profile)
+    profile.goal = ','.join(payload.goals) if payload.goals else None
+    profile.experience = payload.experience
+    profile.gender = payload.gender
+    profile.injuries = payload.injuries
+    profile.days_per_week = payload.daysPerWeek
+    db.commit()
+    db.refresh(profile)
+    return FitnessProfileOut(
+        goals=_parse_goals(profile.goal),
+        experience=profile.experience,
+        gender=profile.gender,
+        injuries=profile.injuries,
+        daysPerWeek=profile.days_per_week,
+    )
 
 
 @router.patch('/me', response_model=UserOut)

@@ -56,7 +56,10 @@ def weekly_volume(db: Session = Depends(get_db), current_user: User = Depends(ge
         )
         .join(WorkoutExercise, WorkoutExercise.workout_id == Workout.id)
         .join(ExerciseSet, ExerciseSet.workout_exercise_id == WorkoutExercise.id)
-        .where(Workout.user_id == current_user.id, ExerciseSet.weight.isnot(None))
+        .where(
+            Workout.user_id == current_user.id,
+            ExerciseSet.weight.isnot(None),
+        )
         .group_by(week_start_expr)
         .order_by(week_start_expr.asc())
     )
