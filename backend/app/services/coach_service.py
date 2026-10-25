@@ -636,34 +636,43 @@ class CoachService:
         timeout = httpx.Timeout(settings.ai_coach_timeout_seconds)
         full_text = ''
         usage: dict | None = None
+        _apply_param_fixes(model, payload)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream(
-                    'POST', endpoint, headers=self._llm_headers(api_key), json=payload,
-                ) as response:
-                    if response.status_code >= 400:
-                        detail = (await response.aread()).decode('utf-8', 'replace').strip()
-                        raise CoachServiceError(
-                            f'LLM провайдер вернул ошибку {response.status_code}: '
-                            f'{detail or "пустой ответ"}'
-                        )
-                    async for line in response.aiter_lines():
-                        if not line.startswith('data: '):
-                            continue
-                        data = line[6:]
-                        if data == '[DONE]':
-                            break
-                        try:
-                            parsed = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        if parsed.get('usage'):
-                            usage = parsed['usage']
-                        choices = parsed.get('choices') or [{}]
-                        chunk = (choices[0].get('delta') or {}).get('content') or ''
-                        if chunk:
-                            full_text += chunk
-                            yield chunk
+                for attempt in range(3):
+                    async with client.stream(
+                        'POST', endpoint, headers=self._llm_headers(api_key), json=payload,
+                    ) as response:
+                        if response.status_code >= 400:
+                            detail = (await response.aread()).decode('utf-8', 'replace').strip()
+                            if (
+                                response.status_code == 400
+                                and attempt < 2
+                                and _learn_param_fix(model, payload, detail)
+                            ):
+                                continue
+                            raise CoachServiceError(
+                                f'LLM провайдер вернул ошибку {response.status_code}: '
+                                f'{detail or "пустой ответ"}'
+                            )
+                        async for line in response.aiter_lines():
+                            if not line.startswith('data: '):
+                                continue
+                            data = line[6:]
+                            if data == '[DONE]':
+                                break
+                            try:
+                                parsed = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            if parsed.get('usage'):
+                                usage = parsed['usage']
+                            choices = parsed.get('choices') or [{}]
+                            chunk = (choices[0].get('delta') or {}).get('content') or ''
+                            if chunk:
+                                full_text += chunk
+                                yield chunk
+                    break
         except httpx.HTTPError as exc:
             raise CoachServiceError('Не удалось связаться с LLM провайдером.') from exc
         finally:
@@ -697,9 +706,18 @@ class CoachService:
 
         endpoint = f'{base_url.rstrip("/")}/chat/completions'
         timeout = httpx.Timeout(settings.ai_coach_timeout_seconds)
+        _apply_param_fixes(model, payload)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(endpoint, headers=self._llm_headers(api_key), json=payload)
+                for _ in range(3):
+                    response = await client.post(
+                        endpoint, headers=self._llm_headers(api_key), json=payload,
+                    )
+                    if response.status_code == 400 and _learn_param_fix(
+                        model, payload, response.text,
+                    ):
+                        continue
+                    break
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text.strip()
@@ -1890,6 +1908,30 @@ class CoachService:
                 CoachChatMessage.id.not_in(ids_to_keep),
             )
         )
+
+
+# Параметры, которые конкретная модель отвергла (например, «рассуждающие»
+# модели не принимают temperature и max_tokens). Запоминаем на время жизни
+# процесса, чтобы не тратить лишний запрос каждый раз.
+_UNSUPPORTED_PARAMS: dict[str, set[str]] = {}
+
+
+def _apply_param_fixes(model: str, payload: dict) -> None:
+    for param in _UNSUPPORTED_PARAMS.get(model, ()):
+        value = payload.pop(param, None)
+        if param == 'max_tokens' and value is not None:
+            payload['max_completion_tokens'] = value
+
+
+def _learn_param_fix(model: str, payload: dict, error_text: str) -> bool:
+    """По ответу 400 «Unsupported parameter» убирает параметр. True — повторить."""
+    match = re.search(r'Unsupported parameter:\W*(\w+)', error_text or '')
+    param = match.group(1) if match else None
+    if not param or param not in payload:
+        return False
+    _UNSUPPORTED_PARAMS.setdefault(model, set()).add(param)
+    _apply_param_fixes(model, payload)
+    return True
 
 
 def _parse_json_object(content: str) -> dict | None:
