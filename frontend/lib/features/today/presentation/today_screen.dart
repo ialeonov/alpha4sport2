@@ -1355,7 +1355,9 @@ class _TodayHeadline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Всегда в одну строку: длинные дни недели просто ужимаются.
+    // Тот же шрифт и цвет, что у заголовков экранов (ScreenHeader), но
+    // всегда в одну строку: длинные дни недели ужимаются.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.centerLeft,
@@ -1365,9 +1367,12 @@ class _TodayHeadline extends StatelessWidget {
         style: TextStyle(
           fontFamily: 'Bebas Neue Cyrillic',
           fontSize: 40,
-          height: 1.0,
-          letterSpacing: 0.5,
-          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.1,
+          height: 0.94,
+          color: isDark
+              ? const Color(0xFFE8C7AA)
+              : Theme.of(context).colorScheme.onSurface,
         ),
       ),
     );
