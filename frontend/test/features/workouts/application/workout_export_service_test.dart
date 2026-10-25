@@ -53,12 +53,13 @@ void main() {
     expect(exercise['name'], 'Bench Press');
     expect(exercise['primary_muscle'], 'chest');
     expect(exercise['secondary_muscles'], ['triceps', 'front_delts']);
-    expect(exercise['best_set'], {'reps': 8, 'weight': 85, 'rpe': 9});
+    expect(exercise['best_set'],
+        {'reps': 8, 'weight': 85, 'set_type': 'work', 'rpe': 9});
     expect(
       exercise['sets'],
       [
-        {'set_index': 1, 'reps': 8, 'weight': 80, 'rpe': 8.5},
-        {'set_index': 2, 'reps': 8, 'weight': 85, 'rpe': 9},
+        {'set_index': 1, 'reps': 8, 'weight': 80, 'set_type': 'work', 'rpe': 8.5},
+        {'set_index': 2, 'reps': 8, 'weight': 85, 'set_type': 'work', 'rpe': 9},
       ],
     );
     expect(export.containsKey('exercise_progress'), isFalse);
@@ -99,7 +100,8 @@ void main() {
     final exercise =
         (workout['exercises'] as List<dynamic>).single as Map<String, dynamic>;
 
-    expect(exercise['best_set'], {'reps': 12, 'weight': null});
+    expect(exercise['best_set'],
+        {'reps': 12, 'weight': null, 'set_type': 'work'});
     expect(exercise['primary_muscle'], isNull);
     expect(exercise['secondary_muscles'], isEmpty);
     expect(exercise.containsKey('progress_snapshot'), isFalse);

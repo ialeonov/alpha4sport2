@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/network/backend_api.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../../core/utils/search.dart';
 
 enum TemplatesSection { exercises, templates }
 
@@ -16,14 +17,15 @@ String _displayMuscleName(String value) {
 }
 
 bool _matchesExerciseSearch(Map<String, dynamic> exercise, String query) {
-  final q = query.trim().toLowerCase();
+  final q = normalizeForSearch(query);
   if (q.isEmpty) return true;
-  final name = (exercise['name'] ?? '').toString().toLowerCase();
-  final primary = (exercise['primary_muscle'] ?? '').toString().toLowerCase();
-  final secondary =
+  final name = normalizeForSearch((exercise['name'] ?? '').toString());
+  final primary = normalizeForSearch(
+      (exercise['primary_muscle'] ?? '').toString().replaceAll('_', ' '));
+  final secondary = normalizeForSearch(
       ((exercise['secondary_muscles'] as List?)?.cast<dynamic>() ?? const [])
-          .map((item) => item.toString().toLowerCase())
-          .join(' ');
+          .map((item) => item.toString().replaceAll('_', ' '))
+          .join(' '));
   return name.contains(q) || primary.contains(q) || secondary.contains(q);
 }
 
@@ -1098,16 +1100,16 @@ class _WorkoutPickerSheetState extends State<_WorkoutPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final normalizedQuery = _query.trim().toLowerCase();
+    final normalizedQuery = normalizeForSearch(_query);
     final filtered = widget.workouts.where((workout) {
       if (normalizedQuery.isEmpty) return true;
-      final name = (workout['name'] ?? '').toString().toLowerCase();
+      final name = normalizeForSearch((workout['name'] ?? '').toString());
       final exercises =
           (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
-      final exerciseText = exercises
+      final exerciseText = normalizeForSearch(exercises
           .map((exercise) =>
-              ((exercise as Map)['exercise_name'] ?? '').toString().toLowerCase())
-          .join(' ');
+              ((exercise as Map)['exercise_name'] ?? '').toString())
+          .join(' '));
       return name.contains(normalizedQuery) ||
           exerciseText.contains(normalizedQuery);
     }).toList();
@@ -1125,15 +1127,6 @@ class _WorkoutPickerSheetState extends State<_WorkoutPickerSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              const SizedBox(height: 16),
               Text(
                 'Выберите тренировку',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -1726,18 +1719,6 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
           builder: (context, scrollController) {
             return Column(
               children: [
-                // Handle
-                Padding(
-                  padding: const EdgeInsets.only(top: 12, bottom: 8),
-                  child: Container(
-                    width: 42,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: scheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
 
                 // Header
                 Padding(

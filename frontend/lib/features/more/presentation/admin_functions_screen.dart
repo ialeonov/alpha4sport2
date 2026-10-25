@@ -4,6 +4,7 @@ import '../../../core/network/backend_api.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../coach/presentation/coach_owner_history_screen.dart';
+import 'ai_usage_tab.dart';
 
 class AdminFunctionsScreen extends StatelessWidget {
   const AdminFunctionsScreen({super.key});
@@ -11,12 +12,15 @@ class AdminFunctionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Админ функции'),
           bottom: const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
+              Tab(text: 'Расход AI'),
               Tab(text: 'История AI-коуча'),
               Tab(text: 'Сообщения'),
             ],
@@ -24,6 +28,7 @@ class AdminFunctionsScreen extends StatelessWidget {
         ),
         body: const TabBarView(
           children: [
+            AiUsageTab(),
             CoachOwnerHistoryScreen(showAppBar: false),
             _AnnouncementAdminTab(),
           ],

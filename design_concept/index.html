@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alpha Sport — Premium Dark Athletic</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:        #080E14;
+      --surface:   #0F1923;
+      --surface-2: #162030;
+      --surface-3: #1D2A3A;
+      --border:    rgba(255,255,255,0.06);
+      --border-2:  rgba(255,255,255,0.03);
+      --text:      #F0F6FF;
+      --text-2:    #4E6880;
+      --text-3:    #1E3040;
+      --teal:      #22D3EE;
+      --teal-dim:  rgba(34,211,238,0.08);
+      --teal-glow: rgba(34,211,238,0.18);
+      --blue:      #60A5FA;
+      --blue-dim:  rgba(96,165,250,0.08);
+      --violet:    #A78BFA;
+      --violet-dim:rgba(167,139,250,0.08);
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #050A0F;
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 48px 20px 64px;
+      background-image: radial-gradient(ellipse at 50% 0%, rgba(34,211,238,0.04) 0%, transparent 60%);
+    }
+
+    .page-header { text-align: center; margin-bottom: 28px; }
+    .page-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--teal); opacity: 0.5; margin-bottom: 8px; }
+    .page-title { font-size: 13px; font-weight: 800; color: var(--text); letter-spacing: 4px; text-transform: uppercase; }
+    .page-sub { font-size: 10px; color: var(--text-2); letter-spacing: 1px; margin-top: 4px; }
+
+    .ext-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+    .ext-tab {
+      font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 500;
+      padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-2); cursor: pointer; transition: all 0.15s;
+    }
+    .ext-tab.active { background: var(--surface); border-color: rgba(34,211,238,0.2); color: var(--teal); }
+
+    /* Phone */
+    .phone {
+      width: 390px; height: 844px; background: var(--bg); border-radius: 50px;
+      overflow: hidden; position: relative;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.05), 0 60px 120px rgba(0,0,0,0.9),
+                  0 0 60px rgba(34,211,238,0.03), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .status-bar { height: 44px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; }
+    .status-time { font-size: 13px; font-weight: 600; color: var(--text); }
+    .status-right { font-size: 11px; color: var(--text-2); }
+
+    .screen { height: calc(844px - 44px - 64px); overflow-y: auto; scrollbar-width: none; }
+    .screen::-webkit-scrollbar { display: none; }
+    .tab { display: none; }
+    .tab.active { display: block; padding-bottom: 20px; }
+
+    /* App bar */
+    .app-bar { padding: 10px 22px 6px; display: flex; align-items: flex-end; justify-content: space-between; }
+    .ab-sub { font-size: 11px; font-weight: 500; color: var(--text-2); margin-bottom: 3px; }
+    .ab-title { font-size: 26px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; line-height: 1; }
+    .avatar {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: var(--surface-3); border: 1px solid rgba(34,211,238,0.15);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: var(--teal);
+    }
+
+    /* Section label */
+    .slbl { font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 1.5px; padding: 0 22px; margin-bottom: 10px; display: block; }
+
+    /* ── Card with left bar ── */
+    .card {
+      margin: 0 14px 10px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 18px;
+      overflow: hidden; display: flex;
+    }
+    .card-bar { width: 3px; flex-shrink: 0; }
+    .card-bar.teal { background: var(--teal); }
+    .card-bar.blue { background: var(--blue); }
+    .card-bar.violet { background: var(--violet); }
+    .card-bar.none { width: 0; }
+    .card-body { flex: 1; min-width: 0; }
+
+    /* ══════ TODAY ══════ */
+
+    /* Big metric strip */
+    .metric-strip { display: flex; padding: 6px 14px 14px; gap: 8px; }
+    .metric-box {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 12px 14px; position: relative; overflow: hidden;
+    }
+    .metric-box.prime { border-color: rgba(34,211,238,0.18); background: var(--teal-dim); }
+    .metric-box.prime::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, var(--teal), transparent);
+    }
+    .mb-val { font-size: 36px; font-weight: 800; color: var(--text); letter-spacing: -1.5px; line-height: 1; }
+    .metric-box.prime .mb-val { color: var(--teal); }
+    .mb-lbl { font-size: 10px; font-weight: 500; color: var(--text-2); margin-top: 4px; }
+
+    /* Workout card */
+    .wk-inner { padding: 16px 18px 12px; }
+    .wk-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+    .wk-name { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+    .wk-tag {
+      font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+      padding: 3px 8px; border-radius: 6px; margin-top: 2px;
+    }
+    .tag-s { background: rgba(34,211,238,0.12); color: var(--teal); }
+    .tag-c { background: rgba(96,165,250,0.12); color: var(--blue); }
+    .tag-r { background: rgba(167,139,250,0.12); color: var(--violet); }
+    .wk-meta { font-size: 11px; color: var(--text-2); }
+
+    /* Exercise rows */
+    .ex-divider { height: 1px; background: var(--border-2); margin: 0 18px; }
+    .ex-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; }
+    .ex-name { font-size: 13px; font-weight: 500; color: var(--text); }
+    .ex-right { display: flex; align-items: baseline; gap: 3px; }
+    .ex-w { font-size: 22px; font-weight: 800; color: var(--teal); letter-spacing: -0.5px; }
+    .ex-wu { font-size: 11px; font-weight: 500; color: var(--text-2); }
+    .ex-s { font-size: 12px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+    .ex-more { font-size: 12px; color: var(--text-3); }
+
+    /* Start button */
+    .btn-start {
+      display: block; width: calc(100% - 28px); margin: 2px 14px 14px;
+      background: var(--teal); color: #050A0F; border: none; border-radius: 14px;
+      height: 50px; font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 700;
+      cursor: pointer; letter-spacing: 0.3px;
+      box-shadow: 0 4px 20px rgba(34,211,238,0.20);
+    }
+
+    /* Muscle bar list */
+    .muscle-list { padding: 12px 18px; display: flex; flex-direction: column; gap: 9px; }
+    .muscle-row { display: flex; align-items: center; gap: 10px; }
+    .muscle-name { font-size: 12px; font-weight: 500; color: var(--text-2); width: 52px; flex-shrink: 0; }
+    .muscle-track { flex: 1; height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+    .muscle-fill { height: 100%; border-radius: 2px; background: var(--teal); opacity: 0.7; }
+    .muscle-fill.lo { background: var(--text-3); opacity: 1; }
+    .muscle-pct { font-size: 11px; font-weight: 600; color: var(--text-2); width: 30px; text-align: right; }
+    .muscle-pct.hi { color: var(--teal); }
+
+    /* ══════ CALENDAR ══════ */
+    .cal-card {
+      margin: 0 14px 10px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 18px; padding: 18px;
+    }
+    .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .cal-mname { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.2px; }
+    .cal-nav { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
+    .cal-dow-row { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; margin-bottom: 4px; }
+    .cal-dow { text-align: center; font-size: 9px; font-weight: 600; color: var(--text-3); padding: 3px 0; text-transform: uppercase; }
+    .cal-days { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
+    .cal-day { aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: var(--text-3); cursor: pointer; position: relative; }
+    .cal-day.has { color: var(--text); font-weight: 600; }
+    .cal-day.today { background: var(--teal-dim); color: var(--teal); font-weight: 700; }
+    .w-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--teal); position: absolute; bottom: 4px; opacity: 0.5; }
+
+    .day-nums { display: flex; gap: 8px; padding: 0 14px; margin-bottom: 10px; }
+    .dn { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+    .dn-val { font-size: 26px; font-weight: 800; color: var(--text); letter-spacing: -0.8px; line-height: 1; }
+    .dn-lbl { font-size: 10px; color: var(--text-2); margin-top: 3px; }
+
+    /* ══════ PROGRESS ══════ */
+    .hero {
+      margin: 4px 14px 10px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 18px; padding: 20px; position: relative; overflow: hidden;
+    }
+    .hero::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--teal) 0%, transparent 50%); }
+    .hero::after { content: ''; position: absolute; right: -20px; top: -20px; width: 120px; height: 120px; background: radial-gradient(circle, rgba(34,211,238,0.10) 0%, transparent 70%); border-radius: 50%; pointer-events: none; }
+    .hero-lbl { font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
+    .hero-val { font-size: 64px; font-weight: 900; color: var(--text); letter-spacing: -3px; line-height: 1; }
+    .hero-val .accent { color: var(--teal); }
+    .hero-unit { font-size: 12px; color: var(--text-2); margin-top: 5px; }
+    .hero-delta { display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; background: rgba(34,211,238,0.08); border: 1px solid rgba(34,211,238,0.15); border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--teal); }
+
+    .chart-card { margin: 0 14px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px 12px; }
+    .chart-lbl { font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 1.5px; }
+    .chart-svg { width: 100%; height: 80px; margin: 10px 0 4px; display: block; }
+    .chart-x { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-3); font-weight: 500; }
+
+    .pr-scroll { display: flex; gap: 8px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; margin-bottom: 10px; }
+    .pr-scroll::-webkit-scrollbar { display: none; }
+    .pr-card { min-width: 110px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .pr-card.pr-new { border-color: rgba(34,211,238,0.2); }
+    .pr-card.pr-new::before { content: ''; display: block; height: 1px; background: linear-gradient(90deg, var(--teal), transparent); margin: -14px -14px 12px; }
+    .pr-ex { font-size: 10px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .pr-val { font-size: 38px; font-weight: 900; color: var(--text); letter-spacing: -1.5px; line-height: 1; }
+    .pr-card.pr-new .pr-val { color: var(--teal); }
+    .pr-u { font-size: 10px; color: var(--text-2); margin-top: 2px; }
+    .pr-badge { font-size: 9px; font-weight: 600; color: var(--teal); margin-top: 8px; }
+
+    .stats-row { display: flex; gap: 8px; padding: 0 14px; }
+    .sbox { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+    .sbox-val { font-size: 30px; font-weight: 800; color: var(--text); letter-spacing: -1px; line-height: 1; }
+    .sbox-val.hi { color: var(--teal); }
+    .sbox-lbl { font-size: 10px; color: var(--text-2); margin-top: 4px; }
+
+    /* ══════ TOOLS ══════ */
+    .ai-banner { margin: 4px 14px 10px; background: var(--surface); border: 1px solid rgba(34,211,238,0.15); border-radius: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; }
+    .ai-banner::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--teal), transparent); }
+    .ai-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--teal); flex-shrink: 0; animation: pulse 2.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.85)} }
+    .ai-text { font-size: 13px; color: var(--text); font-weight: 400; line-height: 1.4; }
+    .ai-text strong { font-weight: 700; color: var(--teal); }
+
+    .tools-list { padding: 0 14px; display: flex; flex-direction: column; gap: 6px; }
+    .tool-row { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; overflow: hidden; display: flex; }
+    .tool-bar { width: 2px; height: 100%; border-radius: 1px; flex-shrink: 0; }
+    .tool-content { display: flex; align-items: center; gap: 12px; flex: 1; }
+    .tool-ic { width: 38px; height: 38px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .tool-name { font-size: 14px; font-weight: 600; color: var(--text); }
+    .tool-desc { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+    .tool-arr { margin-left: auto; font-size: 14px; color: var(--text-3); }
+
+    /* Bottom Nav — icons only */
+    .bottom-nav {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 64px;
+      background: rgba(5,10,15,0.97); backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 8px 8px;
+    }
+    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 0; border-radius: 12px; cursor: pointer; }
+    .nav-ic { font-size: 22px; line-height: 1; opacity: 0.25; transition: opacity 0.15s; }
+    .nav-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--teal); opacity: 0; transition: opacity 0.15s; }
+    .nav-btn.active .nav-ic { opacity: 1; }
+    .nav-btn.active .nav-dot { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <div class="page-eyebrow">Design Concept</div>
+    <div class="page-title">Alpha Sport — Premium Dark Athletic</div>
+    <div class="page-sub">Fitbod · Strong · Nike Training Club</div>
+  </div>
+
+  <div class="ext-tabs">
+    <button class="ext-tab active" onclick="go('today',this)">Сегодня</button>
+    <button class="ext-tab" onclick="go('calendar',this)">Календарь</button>
+    <button class="ext-tab" onclick="go('progress',this)">Прогресс</button>
+    <button class="ext-tab" onclick="go('tools',this)">Инструменты</button>
+  </div>
+
+  <div class="phone">
+    <div class="status-bar">
+      <div class="status-time">9:41</div>
+      <div class="status-right">100%</div>
+    </div>
+
+    <div class="screen" id="screen">
+
+      <!-- TODAY -->
+      <div class="tab active" id="tab-today">
+        <div class="app-bar">
+          <div>
+            <div class="ab-sub">Понедельник, 21 апреля</div>
+            <div class="ab-title">Сегодня</div>
+          </div>
+          <div class="avatar">IL</div>
+        </div>
+
+        <div class="metric-strip">
+          <div class="metric-box prime">
+            <div class="mb-val">14</div>
+            <div class="mb-lbl">🔥 дней подряд</div>
+          </div>
+          <div class="metric-box">
+            <div class="mb-val">6</div>
+            <div class="mb-lbl">тр / неделя</div>
+          </div>
+          <div class="metric-box">
+            <div class="mb-val">24к</div>
+            <div class="mb-lbl">кг объём</div>
+          </div>
+        </div>
+
+        <span class="slbl">Тренировка дня</span>
+
+        <div class="card">
+          <div class="card-bar teal"></div>
+          <div class="card-body">
+            <div class="wk-inner">
+              <div class="wk-top">
+                <div class="wk-name">Верх тела — A</div>
+                <div class="wk-tag tag-s">Сила</div>
+              </div>
+              <div class="wk-meta">7 упражнений · ~65 мин</div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-name">Жим штанги лёжа</div>
+              <div class="ex-right">
+                <span class="ex-w">90</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 4×6</span>
+              </div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-name">Тяга к поясу</div>
+              <div class="ex-right">
+                <span class="ex-w">75</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 4×8</span>
+              </div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-name">Жим гантелей сидя</div>
+              <div class="ex-right">
+                <span class="ex-w">30</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 3×10</span>
+              </div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-more">+ ещё 4 упражнения</div>
+              <div style="font-size:12px;color:var(--text-3);">›</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn-start">Начать тренировку</button>
+
+        <span class="slbl">Нагрузка за 7 дней</span>
+        <div class="card">
+          <div class="card-bar none"></div>
+          <div class="card-body">
+            <div class="muscle-list">
+              <div class="muscle-row">
+                <div class="muscle-name">Спина</div>
+                <div class="muscle-track"><div class="muscle-fill" style="width:80%"></div></div>
+                <div class="muscle-pct hi">80%</div>
+              </div>
+              <div class="muscle-row">
+                <div class="muscle-name">Грудь</div>
+                <div class="muscle-track"><div class="muscle-fill" style="width:65%"></div></div>
+                <div class="muscle-pct hi">65%</div>
+              </div>
+              <div class="muscle-row">
+                <div class="muscle-name">Руки</div>
+                <div class="muscle-track"><div class="muscle-fill" style="width:90%"></div></div>
+                <div class="muscle-pct hi">90%</div>
+              </div>
+              <div class="muscle-row">
+                <div class="muscle-name">Плечи</div>
+                <div class="muscle-track"><div class="muscle-fill lo" style="width:45%"></div></div>
+                <div class="muscle-pct">45%</div>
+              </div>
+              <div class="muscle-row">
+                <div class="muscle-name">Ноги</div>
+                <div class="muscle-track"><div class="muscle-fill lo" style="width:25%"></div></div>
+                <div class="muscle-pct">25%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CALENDAR -->
+      <div class="tab" id="tab-calendar">
+        <div class="app-bar">
+          <div>
+            <div class="ab-sub">2026</div>
+            <div class="ab-title">Апрель</div>
+          </div>
+          <div class="avatar">IL</div>
+        </div>
+
+        <div class="cal-card">
+          <div class="cal-head">
+            <div class="cal-nav">‹</div>
+            <div class="cal-mname">Апрель 2026</div>
+            <div class="cal-nav">›</div>
+          </div>
+          <div class="cal-dow-row">
+            <div class="cal-dow">Пн</div><div class="cal-dow">Вт</div>
+            <div class="cal-dow">Ср</div><div class="cal-dow">Чт</div>
+            <div class="cal-dow">Пт</div><div class="cal-dow">Сб</div>
+            <div class="cal-dow">Вс</div>
+          </div>
+          <div class="cal-days" id="cal-days"></div>
+        </div>
+
+        <span class="slbl">21 апреля</span>
+        <div class="day-nums">
+          <div class="dn"><div class="dn-val">68</div><div class="dn-lbl">минут</div></div>
+          <div class="dn"><div class="dn-val">24к</div><div class="dn-lbl">кг объём</div></div>
+          <div class="dn"><div class="dn-val">7</div><div class="dn-lbl">упражнений</div></div>
+        </div>
+
+        <span class="slbl">Упражнения</span>
+        <div class="card">
+          <div class="card-bar teal"></div>
+          <div class="card-body">
+            <div class="ex-row">
+              <div class="ex-name">Жим лёжа &nbsp;🏆</div>
+              <div class="ex-right">
+                <span class="ex-w">92.5</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 4×6</span>
+              </div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-name">Тяга к поясу</div>
+              <div class="ex-right">
+                <span class="ex-w">75</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 4×8</span>
+              </div>
+            </div>
+            <div class="ex-divider"></div>
+            <div class="ex-row">
+              <div class="ex-name">Жим гантелей</div>
+              <div class="ex-right">
+                <span class="ex-w">30</span><span class="ex-wu">кг</span>
+                <span class="ex-s">· 3×10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROGRESS -->
+      <div class="tab" id="tab-progress">
+        <div class="app-bar">
+          <div>
+            <div class="ab-sub">Апрель 2026</div>
+            <div class="ab-title">Прогресс</div>
+          </div>
+          <div class="avatar">IL</div>
+        </div>
+
+        <div class="hero">
+          <div class="hero-lbl">Общий объём · апрель</div>
+          <div class="hero-val"><span class="accent">127</span> к</div>
+          <div class="hero-unit">кг поднято</div>
+          <div class="hero-delta">↑ +18% к марту</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-lbl">Объём по месяцам</div>
+          <svg class="chart-svg" viewBox="0 0 320 80" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0,72 L53,60 L106,48 L160,38 L213,25 L266,14 L320,6"
+                  stroke="#22D3EE" stroke-width="1.5" fill="none"
+                  stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+            <path d="M0,72 L53,60 L106,48 L160,38 L213,25 L266,14 L320,6 L320,80 L0,80Z" fill="url(#g1)"/>
+            <circle cx="320" cy="6" r="3.5" fill="#22D3EE"/>
+          </svg>
+          <div class="chart-x">
+            <span>Окт</span><span>Ноя</span><span>Дек</span><span>Янв</span><span>Фев</span><span>Мар</span><span>Апр</span>
+          </div>
+        </div>
+
+        <span class="slbl">Личные рекорды</span>
+        <div class="pr-scroll">
+          <div class="pr-card pr-new">
+            <div class="pr-ex">Жим лёжа</div>
+            <div class="pr-val">92.5</div>
+            <div class="pr-u">кг × 6</div>
+            <div class="pr-badge">🏆 Новый PR</div>
+          </div>
+          <div class="pr-card">
+            <div class="pr-ex">Приседания</div>
+            <div class="pr-val">130</div>
+            <div class="pr-u">кг × 5</div>
+          </div>
+          <div class="pr-card">
+            <div class="pr-ex">Становая</div>
+            <div class="pr-val">160</div>
+            <div class="pr-u">кг × 3</div>
+          </div>
+          <div class="pr-card pr-new">
+            <div class="pr-ex">Тяга к поясу</div>
+            <div class="pr-val">80</div>
+            <div class="pr-u">кг × 8</div>
+            <div class="pr-badge">🏆 Новый PR</div>
+          </div>
+        </div>
+
+        <div class="stats-row" style="margin-top:4px;">
+          <div class="sbox"><div class="sbox-val">63</div><div class="sbox-lbl">Тренировок в 2026</div></div>
+          <div class="sbox"><div class="sbox-val hi">14</div><div class="sbox-lbl">Серия дней</div></div>
+          <div class="sbox"><div class="sbox-val">4.2</div><div class="sbox-lbl">Тр. в неделю</div></div>
+        </div>
+      </div>
+
+      <!-- TOOLS -->
+      <div class="tab" id="tab-tools">
+        <div class="app-bar">
+          <div>
+            <div class="ab-sub">Меню</div>
+            <div class="ab-title">Инструменты</div>
+          </div>
+          <div class="avatar">IL</div>
+        </div>
+
+        <div class="ai-banner">
+          <div class="ai-dot"></div>
+          <div class="ai-text">AI Тренер онлайн — <strong>спросите</strong> о прогрессе или программе</div>
+        </div>
+
+        <div class="tools-list">
+          <div class="tool-row" style="border-left: 2px solid var(--teal); border-radius: 14px;">
+            <div class="tool-content">
+              <div class="tool-ic">🤖</div>
+              <div><div class="tool-name">AI Тренер</div><div class="tool-desc">Персональный анализ и рекомендации</div></div>
+              <div class="tool-arr">›</div>
+            </div>
+          </div>
+          <div class="tool-row" style="border-left: 2px solid var(--blue); border-radius: 14px;">
+            <div class="tool-content">
+              <div class="tool-ic">📋</div>
+              <div><div class="tool-name">Программы</div><div class="tool-desc">Тренировочные планы</div></div>
+              <div class="tool-arr">›</div>
+            </div>
+          </div>
+          <div class="tool-row" style="border-left: 2px solid var(--violet); border-radius: 14px;">
+            <div class="tool-content">
+              <div class="tool-ic">📤</div>
+              <div><div class="tool-name">Экспорт</div><div class="tool-desc">Поделиться тренировкой</div></div>
+              <div class="tool-arr">›</div>
+            </div>
+          </div>
+          <div class="tool-row" style="border-left: 2px solid var(--teal); border-radius: 14px; opacity:0.6;">
+            <div class="tool-content">
+              <div class="tool-ic">🏆</div>
+              <div><div class="tool-name">Достижения</div><div class="tool-desc">Рекорды и бейджи</div></div>
+              <div class="tool-arr">›</div>
+            </div>
+          </div>
+          <div class="tool-row" style="border-radius: 14px;">
+            <div class="tool-content">
+              <div class="tool-ic">⚙️</div>
+              <div><div class="tool-name">Настройки</div><div class="tool-desc">Профиль и параметры</div></div>
+              <div class="tool-arr">›</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /screen -->
+
+    <!-- Bottom nav — icons only -->
+    <div class="bottom-nav">
+      <div class="nav-btn active" id="nav-today" onclick="go('today')">
+        <div class="nav-ic">⚡</div>
+        <div class="nav-dot"></div>
+      </div>
+      <div class="nav-btn" id="nav-calendar" onclick="go('calendar')">
+        <div class="nav-ic">📅</div>
+        <div class="nav-dot"></div>
+      </div>
+      <div class="nav-btn" id="nav-progress" onclick="go('progress')">
+        <div class="nav-ic">📈</div>
+        <div class="nav-dot"></div>
+      </div>
+      <div class="nav-btn" id="nav-tools" onclick="go('tools')">
+        <div class="nav-ic">☰</div>
+        <div class="nav-dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TABS = ['today','calendar','progress','tools'];
+    function go(tab, btn) {
+      TABS.forEach(t => {
+        document.getElementById('tab-'+t).classList.toggle('active', t===tab);
+        document.getElementById('nav-'+t).classList.toggle('active', t===tab);
+      });
+      document.getElementById('screen').scrollTop = 0;
+      document.querySelectorAll('.ext-tab').forEach((b,i) => b.classList.toggle('active', TABS[i]===tab));
+    }
+    (function(){
+      const grid = document.getElementById('cal-days');
+      const wk = new Set([1,3,5,7,8,10,12,14,15,17,19,21]);
+      for(let i=0;i<2;i++){const e=document.createElement('div');e.className='cal-day';grid.appendChild(e);}
+      for(let d=1;d<=30;d++){
+        const e=document.createElement('div');
+        e.className='cal-day'+(d===21?' today':wk.has(d)?' has':'');
+        e.textContent=d;
+        if(wk.has(d)&&d!==21){const dot=document.createElement('div');dot.className='w-dot';e.appendChild(dot);}
+        grid.appendChild(e);
+      }
+    })();
+  </script>
+</body>
+</html>

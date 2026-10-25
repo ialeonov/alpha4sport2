@@ -332,6 +332,78 @@ class BackendApi {
     }
   }
 
+  static Future<List<Map<String, dynamic>>> getWorkoutsPaged({
+    required int limit,
+    int offset = 0,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get(
+        '/api/v1/workouts',
+        queryParameters: {'limit': limit, 'offset': offset},
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить тренировки.');
+    }
+  }
+
+  static String _fmtDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static Future<List<Map<String, dynamic>>> getWorkoutsInRange({
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get(
+        '/api/v1/workouts',
+        queryParameters: {
+          'from_date': _fmtDate(from),
+          'to_date': _fmtDate(to),
+        },
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить тренировки.');
+    }
+  }
+
+  static Future<List<String>> getWorkoutDays() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/workouts/days');
+      return (response.data as List).cast<String>();
+    } on DioException catch (error) {
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить даты тренировок.');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getLastExercise({
+    required String name,
+    int? catalogId,
+  }) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final params = <String, dynamic>{'name': name};
+      if (catalogId != null) params['catalog_id'] = catalogId;
+      final response = await dio.get(
+        '/api/v1/workouts/last-exercise',
+        queryParameters: params,
+      );
+      if (response.data == null) return null;
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      _throwFriendlyError(error,
+          defaultMessage: 'Не удалось загрузить историю упражнения.');
+    }
+  }
+
   static Future<Map<String, dynamic>> createWorkout({
     required String name,
     required String exerciseName,
@@ -1031,6 +1103,22 @@ class BackendApi {
     }
   }
 
+  static Future<Map<String, dynamic>> getOwnerAiUsage({int days = 30}) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get(
+        '/api/v1/coach/owner/usage',
+        queryParameters: {'days': days},
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (error) {
+      _throwFriendlyError(
+        error,
+        defaultMessage: 'Не удалось загрузить расход AI.',
+      );
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getOwnerCoachHistory() async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -1042,7 +1130,7 @@ class BackendApi {
       _throwFriendlyError(
         error,
         defaultMessage:
-            'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¾Ð±Ñ‰ÑƒÑŽ Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ð¹ Ðº AI - ÐºÐ¾ÑƒÑ‡Ñƒ.',
+            'Не удалось загрузить общую историю обращений к AI - коучу.',
       );
     }
   }
@@ -1144,6 +1232,40 @@ class BackendApi {
         error,
         defaultMessage: 'Не удалось очистить историю AI - коуча.',
       );
+    }
+  }
+
+  /// Запрашивает ежедневный брифинг коуча для главного экрана.
+  /// Возвращает {headline, insight} или null при ошибке/недоступности.
+  static Future<Map<String, dynamic>?> getDailyInsight() async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.get('/api/v1/coach/daily-insight');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException {
+      // Опциональная фича — не блокируем экран при ошибке
+      return null;
+    }
+  }
+
+  /// Запрашивает AI-объяснения для рекомендаций по упражнениям.
+  /// [exercises] — список карт с ключами: name, decision, rep_range,
+  /// recommended_weight, delta_weight, confidence, sessions.
+  /// Возвращает {explanations: {name: text}, summary: text} или null при ошибке.
+  static Future<Map<String, dynamic>?> getProgressInsights(
+    List<Map<String, dynamic>> exercises,
+  ) async {
+    try {
+      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
+      final response = await dio.post(
+        '/api/v1/coach/progress-insights',
+        data: {'exercises': exercises},
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException {
+      // Не бросаем исключение — фича опциональная,
+      // экран работает и без AI-объяснений
+      return null;
     }
   }
 

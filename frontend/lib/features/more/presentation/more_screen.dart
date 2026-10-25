@@ -7,7 +7,6 @@ import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../body/presentation/body_screen.dart';
 import '../../programs/presentation/programs_screen.dart';
-import '../../progress/presentation/progress_screen.dart';
 import '../../templates/presentation/templates_screen.dart';
 import 'admin_functions_screen.dart';
 import 'fitness_profile_screen.dart';
@@ -118,28 +117,6 @@ class _MoreScreenState extends State<MoreScreen> {
                     title: 'Упражнения',
                     child: const TemplatesScreen(
                         section: TemplatesSection.exercises),
-                  ),
-                ),
-                _Divider(),
-                _Tile(
-                  title: 'Статистика',
-                  icon: Icons.bar_chart_rounded,
-                  iconColor: const Color(0xFF1A6B75),
-                  onTap: () => _openPage(
-                    context,
-                    title: 'Статистика',
-                    child: const StatisticsScreen(),
-                  ),
-                ),
-                _Divider(),
-                _Tile(
-                  title: 'Рекомендации',
-                  icon: Icons.trending_up_rounded,
-                  iconColor: const Color(0xFF2E7D32),
-                  onTap: () => _openPage(
-                    context,
-                    title: 'Рекомендации',
-                    child: const RecommendationsScreen(),
                   ),
                 ),
               ],

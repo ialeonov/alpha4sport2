@@ -1,7 +1,4 @@
-import 'dart:math' show log;
-
 import 'muscle_heatmap_models.dart';
-import 'muscle_load_normalizer.dart';
 
 const String _coreMuscle = 'кор';
 const Set<String> _coreMuscleAliases = {
@@ -9,287 +6,289 @@ const Set<String> _coreMuscleAliases = {
   'поясница',
 };
 
+/// Считает нагрузку на мышцы в «эффективных подходах».
+///
+/// Один рабочий подход, сделанный близко к отказу, на основную мышцу
+/// упражнения = 1 эффективный подход. Дальше применяются поправки:
+/// * разминочные подходы не считаются;
+/// * интенсивность — по RPE, а если его нет, по тому, насколько подход
+///   близок к лучшему e1RM пользователя в этом же упражнении
+///   (20 кг в махах и 20 кг в жиме ногами — разные вещи);
+/// * вторичные мышцы получают долю подхода, стабилизаторы — ещё меньше;
+/// * в рамках одной тренировки работает убывающая отдача по каждой мышце.
+///
+/// Результат одинаково интерпретируется на всех экранах: «сколько
+/// эффективных подходов получила мышца» за тренировку или за период.
 class MuscleLoadCalculator {
   const MuscleLoadCalculator({
-    this.baseSetScore = 1.0,
     this.primaryMuscleFactor = 1.0,
-    this.secondaryMuscleFactor = 0.4,
-    this.stabilizerFactor = 0.15,
+    this.secondaryMuscleFactor = 0.5,
+    this.stabilizerFactor = 0.2,
     this.stabilizerMuscles = const {_coreMuscle},
-    this.normalizer = const MuscleLoadNormalizer(),
   });
 
-  final double baseSetScore;
   final double primaryMuscleFactor;
   final double secondaryMuscleFactor;
 
-  /// Factor applied to stabilizer muscles (e.g. core) that are listed as
-  /// secondary in nearly every exercise. Much lower than [secondaryMuscleFactor]
-  /// so that stabilizers don't dominate the heatmap.
+  /// Доля для мышц-стабилизаторов (кор), которые указаны вторичными почти
+  /// в каждом упражнении и иначе доминировали бы на карте.
   final double stabilizerFactor;
-
-  /// Set of muscle keys treated as stabilizers. Defaults to {'кор'}.
   final Set<String> stabilizerMuscles;
-  final MuscleLoadNormalizer normalizer;
 
+  /// Нагрузка одной тренировки.
   Map<String, double> calculateForWorkout({
     required Map<String, dynamic> workout,
     required List<Map<String, dynamic>> exerciseCatalog,
+    List<Map<String, dynamic>> referenceWorkouts = const [],
   }) {
-    return calculateForWorkouts(
+    return calculate(
       workouts: [workout],
       exerciseCatalog: exerciseCatalog,
+      referenceWorkouts: referenceWorkouts,
     );
   }
 
-  Map<String, double> calculateForWorkouts({
+  /// Суммарная нагрузка за несколько тренировок (например, за неделю).
+  ///
+  /// [referenceWorkouts] — история для оценки лучшего e1RM в каждом
+  /// упражнении. Сами [workouts] учитываются всегда, поэтому даже без
+  /// истории лёгкие подходы считаются относительно лучшего подхода сессии.
+  Map<String, double> calculate({
     required List<Map<String, dynamic>> workouts,
     required List<Map<String, dynamic>> exerciseCatalog,
+    List<Map<String, dynamic>> referenceWorkouts = const [],
   }) {
-    final catalogById = <int, Map<String, dynamic>>{};
-    final catalogByName = <String, Map<String, dynamic>>{};
-
-    for (final exercise in exerciseCatalog) {
-      final id = exercise['id'];
-      if (id is int) {
-        catalogById[id] = exercise;
-      }
-      final name = (exercise['name'] ?? '').toString().trim();
-      if (name.isNotEmpty) {
-        catalogByName[_normalizeExerciseLookupName(name)] = exercise;
-      }
-    }
-
+    final lookup = _CatalogLookup(exerciseCatalog);
+    final bestE1rm = _bestE1rmByExercise(
+      [...referenceWorkouts, ...workouts],
+      lookup,
+    );
     final loads = <String, double>{};
-    // Separate set counters for primary and secondary involvement so that
-    // secondary sets (e.g. biceps in a back exercise) do not consume the
-    // diminishing-returns budget for dedicated primary work.
-    final primarySetCountsByMuscle = <String, int>{};
-    final secondarySetCountsByMuscle = <String, int>{};
     for (final workout in workouts) {
-      final exercises =
-          (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
-      for (final rawExercise in exercises) {
-        if (rawExercise is! Map) {
-          continue;
-        }
-        final exercise = rawExercise.cast<String, dynamic>();
-        final catalogEntry = _resolveCatalogEntry(
-          exercise: exercise,
-          catalogById: catalogById,
-          catalogByName: catalogByName,
-        );
-        if (catalogEntry == null) {
-          continue;
-        }
-
-        final primaryMuscle =
-            _canonicalizeMuscleKey(catalogEntry['primary_muscle']);
-        final secondaryMuscles = _canonicalizeSecondaryMuscles(
-          primaryMuscle,
-          (catalogEntry['secondary_muscles'] as List?)?.cast<dynamic>() ??
-              const [],
-        );
-        final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
-
-        for (final rawSet in sets) {
-          if (rawSet is! Map) {
-            continue;
-          }
-          final set = rawSet.cast<String, dynamic>();
-          final setScore = _calculateSetScore(set);
-          if (setScore <= 0) {
-            continue;
-          }
-
-          if (primaryMuscle.isNotEmpty) {
-            _addMuscleLoad(
-              loads: loads,
-              setCountsByMuscle: primarySetCountsByMuscle,
-              muscle: primaryMuscle,
-              setScore: setScore,
-              muscleFactor: primaryMuscleFactor,
-            );
-          }
-
-          for (final rawMuscle in secondaryMuscles) {
-            final muscle = _canonicalizeMuscleKey(rawMuscle);
-            if (muscle.isEmpty) {
-              continue;
-            }
-            final factor = stabilizerMuscles.contains(muscle)
-                ? stabilizerFactor
-                : secondaryMuscleFactor;
-            _addMuscleLoad(
-              loads: loads,
-              setCountsByMuscle: secondarySetCountsByMuscle,
-              muscle: muscle,
-              setScore: setScore,
-              muscleFactor: factor,
-            );
-          }
-        }
-      }
+      _calculateWorkout(workout, lookup, bestE1rm).forEach((muscle, value) {
+        loads.update(muscle, (prev) => prev + value, ifAbsent: () => value);
+      });
     }
-
     return loads;
   }
 
-  Map<String, double> calculateNormalizedForWorkout({
-    required Map<String, dynamic> workout,
-    required List<Map<String, dynamic>> exerciseCatalog,
-  }) {
-    return normalizer.normalize(
-      calculateForWorkout(workout: workout, exerciseCatalog: exerciseCatalog),
-    );
-  }
-
-  Map<String, double> calculateNormalizedForWorkouts({
+  /// Для каждой мышцы — дата последней тренировки, где она получила хотя бы
+  /// [minEffectiveSets] эффективных подходов.
+  Map<String, DateTime> lastTrainedAt({
     required List<Map<String, dynamic>> workouts,
     required List<Map<String, dynamic>> exerciseCatalog,
+    double minEffectiveSets = 1.0,
   }) {
-    return normalizer.normalize(
-      calculateForWorkouts(
-          workouts: workouts, exerciseCatalog: exerciseCatalog),
-    );
-  }
-
-  Map<String, double> calculatePeakForCalendarDays({
-    required List<Map<String, dynamic>> workouts,
-    required List<Map<String, dynamic>> exerciseCatalog,
-    required DateTime? Function(Map<String, dynamic> workout) dayResolver,
-  }) {
-    final workoutsByDay = <DateTime, List<Map<String, dynamic>>>{};
-
+    final lookup = _CatalogLookup(exerciseCatalog);
+    final bestE1rm = _bestE1rmByExercise(workouts, lookup);
+    final result = <String, DateTime>{};
     for (final workout in workouts) {
-      final resolved = dayResolver(workout);
-      if (resolved == null) {
-        continue;
-      }
-      final day = DateTime(resolved.year, resolved.month, resolved.day);
-      workoutsByDay.putIfAbsent(day, () => []).add(workout);
-    }
-
-    final peakLoads = <String, double>{};
-    for (final dayWorkouts in workoutsByDay.values) {
-      final dayLoads = calculateForWorkouts(
-        workouts: dayWorkouts,
-        exerciseCatalog: exerciseCatalog,
-      );
-      for (final entry in dayLoads.entries) {
-        final previous = peakLoads[entry.key] ?? 0;
-        if (entry.value > previous) {
-          peakLoads[entry.key] = entry.value;
+      final startedAt =
+          DateTime.tryParse((workout['started_at'] ?? '').toString())
+              ?.toLocal();
+      if (startedAt == null) continue;
+      _calculateWorkout(workout, lookup, bestE1rm).forEach((muscle, value) {
+        if (value < minEffectiveSets) return;
+        final previous = result[muscle];
+        if (previous == null || startedAt.isAfter(previous)) {
+          result[muscle] = startedAt;
         }
-      }
+      });
     }
-
-    return peakLoads;
+    return result;
   }
 
   List<TopMuscleLoad> buildTopMuscles({
-    required Map<String, double> rawLoads,
-    required Map<String, double> normalizedLoads,
+    required Map<String, double> loads,
     required Map<String, String> labels,
     int limit = 3,
+    double minLoad = 0.5,
   }) {
-    final sorted = rawLoads.entries.toList()
+    final sorted = loads.entries.where((e) => e.value >= minLoad).toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return sorted
-        .where((entry) => entry.value > 0)
         .take(limit)
         .map(
           (entry) => TopMuscleLoad(
             muscle: entry.key,
             label: labels[entry.key] ?? _formatMuscleLabel(entry.key),
-            rawLoad: entry.value,
-            normalizedLoad: normalizedLoads[entry.key] ?? 0,
+            load: entry.value,
           ),
         )
         .toList();
   }
 
-  void _addMuscleLoad({
-    required Map<String, double> loads,
-    required Map<String, int> setCountsByMuscle,
-    required String muscle,
-    required double setScore,
-    required double muscleFactor,
-  }) {
-    final nextSetCount = (setCountsByMuscle[muscle] ?? 0) + 1;
-    setCountsByMuscle[muscle] = nextSetCount;
-    final contribution =
-        setScore * muscleFactor * _diminishingReturnsFactor(nextSetCount);
-    loads.update(
-      muscle,
-      (value) => value + contribution,
-      ifAbsent: () => contribution,
-    );
+  Map<String, double> _calculateWorkout(
+    Map<String, dynamic> workout,
+    _CatalogLookup lookup,
+    Map<String, double> bestE1rm,
+  ) {
+    // Сырые эффективные подходы по мышцам внутри одной тренировки — до
+    // применения убывающей отдачи.
+    final rawByMuscle = <String, double>{};
+    final exercises =
+        (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
+    for (final rawExercise in exercises) {
+      if (rawExercise is! Map) continue;
+      final exercise = rawExercise.cast<String, dynamic>();
+      final catalogEntry = lookup.resolve(exercise);
+      if (catalogEntry == null) continue;
+
+      final primaryMuscle =
+          _canonicalizeMuscleKey(catalogEntry['primary_muscle']);
+      final secondaryMuscles = _canonicalizeSecondaryMuscles(
+        primaryMuscle,
+        (catalogEntry['secondary_muscles'] as List?)?.cast<dynamic>() ??
+            const [],
+      );
+      final best = bestE1rm[lookup.keyFor(exercise, catalogEntry)] ?? 0;
+
+      final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
+      for (final rawSet in sets) {
+        if (rawSet is! Map) continue;
+        final setScore = effectiveSetScore(rawSet.cast<String, dynamic>(),
+            bestE1rm: best);
+        if (setScore <= 0) continue;
+
+        if (primaryMuscle.isNotEmpty) {
+          rawByMuscle.update(
+            primaryMuscle,
+            (v) => v + setScore * primaryMuscleFactor,
+            ifAbsent: () => setScore * primaryMuscleFactor,
+          );
+        }
+        for (final muscle in secondaryMuscles) {
+          final factor = stabilizerMuscles.contains(muscle)
+              ? stabilizerFactor
+              : secondaryMuscleFactor;
+          rawByMuscle.update(
+            muscle,
+            (v) => v + setScore * factor,
+            ifAbsent: () => setScore * factor,
+          );
+        }
+      }
+    }
+    return {
+      for (final entry in rawByMuscle.entries)
+        entry.key: sessionDiminishingReturns(entry.value),
+    };
   }
 
-  double _calculateSetScore(Map<String, dynamic> set) {
+  /// Вклад одного подхода: 0 для разминки и пустых подходов, иначе 0.3–1.0.
+  double effectiveSetScore(Map<String, dynamic> set, {double bestE1rm = 0}) {
+    if ((set['set_type'] ?? 'work').toString() == 'warmup') return 0;
     final reps = _toDouble(set['reps']);
-    if (reps <= 0) {
-      return 0;
+    if (reps <= 0) return 0;
+    return _repFactor(reps) * _intensityFactor(set, reps, bestE1rm);
+  }
+
+  double _intensityFactor(Map<String, dynamic> set, double reps, double best) {
+    final rpe = _toDouble(set['rpe']);
+    if (rpe > 0) {
+      if (rpe >= 8) return 1.0;
+      if (rpe >= 7) return 0.85;
+      if (rpe >= 6) return 0.65;
+      return 0.45;
     }
     final weight = _toDouble(set['weight']);
-    // Absolute log scale so score never decreases when a new heavy set is added.
-    // 100 kg → 1.0, 50 kg → 0.85, 20 kg → 0.65, 10 kg → 0.52, bodyweight → 1.0.
-    final weightFactor =
-        weight > 0 ? (log(weight + 1) / log(101)).clamp(0.2, 1.0) : 1.0;
-    return baseSetScore * _repFactor(reps) * weightFactor;
+    if (weight <= 0 || best <= 0) {
+      // Собственный вес или нет истории — считаем рабочим подходом.
+      return 1.0;
+    }
+    // Эпли учитывает повторения, поэтому отношение e1RM подхода к лучшему
+    // e1RM — грубая оценка близости к отказу.
+    final ratio = estimate1rm(weight, reps) / best;
+    if (ratio >= 0.9) return 1.0;
+    if (ratio <= 0.65) return 0.3;
+    return 0.3 + (ratio - 0.65) / 0.25 * 0.7;
   }
 
   double _repFactor(double reps) {
-    if (reps <= 12) {
-      return 1.0;
-    }
-    if (reps <= 20) {
-      return 0.85;
-    }
-    return 0.65;
+    if (reps <= 3) return 0.75;
+    if (reps <= 30) return 1.0;
+    return 0.7;
   }
 
-  double _diminishingReturnsFactor(int setCount) {
-    if (setCount <= 4) {
-      return 1.0;
-    }
-    if (setCount <= 7) {
-      return 0.8;
-    }
-    return 0.6;
-  }
-
-  Map<String, dynamic>? _resolveCatalogEntry({
-    required Map<String, dynamic> exercise,
-    required Map<int, Map<String, dynamic>> catalogById,
-    required Map<String, Map<String, dynamic>> catalogByName,
-  }) {
-    final catalogExerciseId = exercise['catalog_exercise_id'];
-    if (catalogExerciseId is int) {
-      final byId = catalogById[catalogExerciseId];
-      if (byId != null) {
-        return byId;
+  Map<String, double> _bestE1rmByExercise(
+    List<Map<String, dynamic>> workouts,
+    _CatalogLookup lookup,
+  ) {
+    final best = <String, double>{};
+    for (final workout in workouts) {
+      final exercises =
+          (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
+      for (final rawExercise in exercises) {
+        if (rawExercise is! Map) continue;
+        final exercise = rawExercise.cast<String, dynamic>();
+        final key = lookup.keyFor(exercise, lookup.resolve(exercise));
+        if (key.isEmpty) continue;
+        final sets = (exercise['sets'] as List?)?.cast<dynamic>() ?? const [];
+        for (final rawSet in sets) {
+          if (rawSet is! Map) continue;
+          if ((rawSet['set_type'] ?? 'work').toString() == 'warmup') continue;
+          final reps = _toDouble(rawSet['reps']);
+          final weight = _toDouble(rawSet['weight']);
+          if (reps <= 0 || reps > 30 || weight <= 0) continue;
+          final e1rm = estimate1rm(weight, reps);
+          if (e1rm > (best[key] ?? 0)) best[key] = e1rm;
+        }
       }
     }
+    return best;
+  }
+}
 
+/// Оценка 1ПМ по Эпли.
+double estimate1rm(double weight, double reps) =>
+    reps <= 1 ? weight : weight * (1 + reps / 30);
+
+/// Убывающая отдача внутри одной тренировки: первые 6 эффективных подходов
+/// на мышцу идут полностью, 6–10 — на 70%, дальше — на 40%.
+double sessionDiminishingReturns(double sets) {
+  if (sets <= 6) return sets;
+  if (sets <= 10) return 6 + (sets - 6) * 0.7;
+  return 8.8 + (sets - 10) * 0.4;
+}
+
+class _CatalogLookup {
+  _CatalogLookup(List<Map<String, dynamic>> catalog) {
+    for (final exercise in catalog) {
+      final id = exercise['id'];
+      if (id is int) byId[id] = exercise;
+      final name = (exercise['name'] ?? '').toString().trim();
+      if (name.isNotEmpty) byName[_normalizeExerciseLookupName(name)] = exercise;
+    }
+  }
+
+  final byId = <int, Map<String, dynamic>>{};
+  final byName = <String, Map<String, dynamic>>{};
+
+  Map<String, dynamic>? resolve(Map<String, dynamic> exercise) {
+    final catalogExerciseId = exercise['catalog_exercise_id'];
+    if (catalogExerciseId is int) {
+      final entry = byId[catalogExerciseId];
+      if (entry != null) return entry;
+    }
     final name = (exercise['exercise_name'] ?? '').toString().trim();
-    if (name.isEmpty) {
-      return null;
-    }
-    return catalogByName[_normalizeExerciseLookupName(name)];
+    if (name.isEmpty) return null;
+    return byName[_normalizeExerciseLookupName(name)];
   }
 
-  double _toDouble(dynamic value) {
-    if (value is num) {
-      return value.toDouble();
-    }
-    if (value == null) {
-      return 0;
-    }
-    return double.tryParse(value.toString().replaceAll(',', '.')) ?? 0;
+  /// Ключ упражнения для истории e1RM: id каталога, иначе нормализованное имя.
+  String keyFor(Map<String, dynamic> exercise, Map<String, dynamic>? entry) {
+    final id = entry?['id'];
+    if (id is int) return 'id:$id';
+    final name = (exercise['exercise_name'] ?? '').toString().trim();
+    return name.isEmpty ? '' : 'name:${_normalizeExerciseLookupName(name)}';
   }
+}
+
+double _toDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  if (value == null) return 0;
+  return double.tryParse(value.toString().replaceAll(',', '.')) ?? 0;
 }
 
 String _normalizeExerciseLookupName(String value) {
@@ -309,10 +308,9 @@ List<String> _canonicalizeSecondaryMuscles(
   final muscles = <String>[];
   for (final rawMuscle in rawMuscles) {
     final muscle = _canonicalizeMuscleKey(rawMuscle);
-    if (muscle.isEmpty || muscle == primaryMuscle || seen.contains(muscle)) {
+    if (muscle.isEmpty || muscle == primaryMuscle || !seen.add(muscle)) {
       continue;
     }
-    seen.add(muscle);
     muscles.add(muscle);
   }
   return muscles;
@@ -322,8 +320,6 @@ String formatMuscleLabel(String value) => _formatMuscleLabel(value);
 
 String _formatMuscleLabel(String value) {
   final normalized = value.trim().replaceAll('_', ' ');
-  if (normalized.isEmpty) {
-    return normalized;
-  }
+  if (normalized.isEmpty) return normalized;
   return normalized[0].toUpperCase() + normalized.substring(1);
 }

@@ -17,23 +17,22 @@ class OfflineBanner extends StatefulWidget {
 
 class _OfflineBannerState extends State<OfflineBanner> {
   late bool _isOnline;
-  late bool _hasPending;
+  bool _isSyncing = false;
   StreamSubscription<bool>? _sub;
 
   @override
   void initState() {
     super.initState();
     _isOnline = ConnectivityService.instance.isOnline;
-    _hasPending = !OfflineQueue.isEmpty;
     _sub = ConnectivityService.instance.onlineStream.listen((online) {
       if (!mounted) return;
       setState(() {
         _isOnline = online;
-        _hasPending = !OfflineQueue.isEmpty;
       });
-      if (online && _hasPending) {
-        SyncService.instance.drainQueue().then((_) {
-          if (mounted) setState(() => _hasPending = !OfflineQueue.isEmpty);
+      if (online && !OfflineQueue.isEmpty) {
+        setState(() => _isSyncing = true);
+        SyncService.instance.drainQueue().whenComplete(() {
+          if (mounted) setState(() => _isSyncing = false);
         });
       }
     });
@@ -47,12 +46,12 @@ class _OfflineBannerState extends State<OfflineBanner> {
 
   @override
   Widget build(BuildContext context) {
-    final showBanner = !_isOnline || _hasPending;
+    final showBanner = !_isOnline || _isSyncing;
     return Column(
       children: [
         if (showBanner)
           Material(
-            color: _isOnline ? Colors.orange.shade700 : Colors.grey.shade800,
+            color: _isSyncing ? Colors.orange.shade700 : Colors.grey.shade800,
             child: SafeArea(
               bottom: false,
               child: SizedBox(
@@ -63,7 +62,7 @@ class _OfflineBannerState extends State<OfflineBanner> {
                   child: Row(
                     children: [
                       Icon(
-                        _isOnline
+                        _isSyncing
                             ? Icons.sync_rounded
                             : Icons.wifi_off_rounded,
                         size: 16,
@@ -71,7 +70,7 @@ class _OfflineBannerState extends State<OfflineBanner> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _isOnline
+                        _isSyncing
                             ? 'Синхронизация...'
                             : 'Нет соединения — данные сохраняются локально',
                         style: const TextStyle(

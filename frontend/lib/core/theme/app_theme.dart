@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class AppTheme {
-  static const Color _seed = Color(0xFF4F8D95);
+  static const Color _seed = Color(0xFFE8B84A);
+
+  // Направление «Тёмный атлет»: графит, золото — действия и награды,
+  // бирюза — AI-коуч и подсказки.
+  static const Color gold = Color(0xFFE8B84A);
+  static const Color onGold = Color(0xFF14110A);
+  static const Color coachTeal = Color(0xFF5CC2B5);
 
   // Dark chrome
-  static const Color _chromeDark = Color(0xFF060810);
-  static const Color _chromeOnDark = Color(0xFFF4EFE8);
+  static const Color _chromeDark = Color(0xFF141A1F);
+  static const Color _chromeOnDark = Color(0xFFF2F0EA);
 
   // Light chrome
   static const Color _chromeLight = Color(0xFFEDE8E1);
@@ -16,34 +22,34 @@ class AppTheme {
     final baseScheme = ColorScheme.fromSeed(
       seedColor: _seed,
       brightness: Brightness.dark,
-      surface: const Color(0xFF121821),
+      surface: const Color(0xFF0F1215),
     );
 
     final colorScheme = baseScheme.copyWith(
-      primary: const Color(0xFFE8C7AA),
-      onPrimary: const Color(0xFF33241B),
-      primaryContainer: const Color(0xFF5D473A),
-      onPrimaryContainer: const Color(0xFFFFEBDD),
-      secondary: const Color(0xFF74C2CB),
-      onSecondary: const Color(0xFF0D2B2F),
-      secondaryContainer: const Color(0xFF1D4A51),
-      onSecondaryContainer: const Color(0xFFE2F7F8),
+      primary: gold,
+      onPrimary: onGold,
+      primaryContainer: const Color(0xFF3A2F17),
+      onPrimaryContainer: const Color(0xFFFBE7B8),
+      secondary: coachTeal,
+      onSecondary: const Color(0xFF0B2421),
+      secondaryContainer: const Color(0xFF1E3533),
+      onSecondaryContainer: const Color(0xFFD5EFEB),
       tertiary: const Color(0xFFADC58C),
       onTertiary: const Color(0xFF1E280E),
       tertiaryContainer: const Color(0xFF3E4A2B),
       onTertiaryContainer: const Color(0xFFF2F7D8),
-      surface: const Color(0xFF0C1018),
-      onSurface: const Color(0xFFF5F1EC),
-      onSurfaceVariant: const Color(0xFFA4B0BE),
+      surface: const Color(0xFF0F1215),
+      onSurface: const Color(0xFFF2F0EA),
+      onSurfaceVariant: const Color(0xFF9AA3AD),
       surfaceTint: Colors.transparent,
-      surfaceContainerLowest: const Color(0xFF08090E),
-      surfaceContainerLow: const Color(0xFF0F1319),
-      surfaceContainer: const Color(0xFF141820),
-      surfaceContainerHigh: const Color(0xFF191F28),
-      surfaceContainerHighest: const Color(0xFF202835),
-      surfaceBright: const Color(0xFF2C3846),
-      outline: const Color(0xFF76695E),
-      outlineVariant: const Color(0xFF2E3A47),
+      surfaceContainerLowest: const Color(0xFF0B0E10),
+      surfaceContainerLow: const Color(0xFF181D22),
+      surfaceContainer: const Color(0xFF1B2026),
+      surfaceContainerHigh: const Color(0xFF20262D),
+      surfaceContainerHighest: const Color(0xFF262D35),
+      surfaceBright: const Color(0xFF2C343D),
+      outline: const Color(0xFF6B747E),
+      outlineVariant: const Color(0xFF2C343D),
     );
 
     return _buildTheme(
@@ -60,10 +66,11 @@ class AppTheme {
     );
 
     final colorScheme = baseScheme.copyWith(
-      primary: const Color(0xFF7A4F35),
+      // Тёмное золото: на светлом фоне яркое не проходит по контрасту.
+      primary: const Color(0xFF7A5A12),
       onPrimary: const Color(0xFFFFFFFF),
-      primaryContainer: const Color(0xFFFFDCC8),
-      onPrimaryContainer: const Color(0xFF33180A),
+      primaryContainer: const Color(0xFFFBE7B8),
+      onPrimaryContainer: const Color(0xFF2A1F05),
       secondary: const Color(0xFF1A6B75),
       onSecondary: const Color(0xFFFFFFFF),
       secondaryContainer: const Color(0xFFB8EDF4),
@@ -143,16 +150,15 @@ class AppTheme {
         color: colorScheme.surfaceContainerLow,
         shadowColor: Colors.black.withValues(alpha: 0.18),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.20),
-          ),
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide.none,
         ),
         margin: EdgeInsets.zero,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 60,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+        height: 64,
+        // С пятью вкладками одних иконок мало — подпись у активной вкладки.
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         backgroundColor: chrome.withValues(alpha: 0.97),
         surfaceTintColor: Colors.transparent,
         indicatorColor: Colors.transparent,
@@ -161,8 +167,8 @@ class AppTheme {
           return IconThemeData(
             size: isSelected ? 26 : 22,
             color: isSelected
-                ? colorScheme.secondary
-                : chromeOn.withValues(alpha: 0.45),
+                ? colorScheme.primary
+                : chromeOn.withValues(alpha: 0.5),
           );
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -170,8 +176,8 @@ class AppTheme {
           return base.textTheme.labelSmall?.copyWith(
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
             color: isSelected
-                ? colorScheme.secondary
-                : chromeOn.withValues(alpha: 0.55),
+                ? colorScheme.primary
+                : chromeOn.withValues(alpha: 0.6),
             letterSpacing: isSelected ? 0.2 : 0,
           );
         }),
@@ -188,7 +194,7 @@ class AppTheme {
           backgroundColor: colorScheme.primary,
           foregroundColor: colorScheme.onPrimary,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           textStyle:
               base.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
@@ -200,9 +206,9 @@ class AppTheme {
             color: colorScheme.outlineVariant.withValues(alpha: 0.9),
             width: 1.05,
           ),
-          foregroundColor: colorScheme.secondary,
+          foregroundColor: colorScheme.onSurface,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -232,7 +238,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(20),
-          borderSide: BorderSide(color: colorScheme.secondary, width: 1.8),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1.8),
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
@@ -248,10 +254,11 @@ class AppTheme {
       tabBarTheme: TabBarThemeData(
         dividerColor: Colors.transparent,
         indicator: BoxDecoration(
-          color: colorScheme.secondary.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(999),
+          color: colorScheme.primary,
+          borderRadius: BorderRadius.circular(12),
         ),
-        labelColor: colorScheme.secondary,
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: colorScheme.onPrimary,
         unselectedLabelColor: colorScheme.onSurfaceVariant,
       ),
       snackBarTheme: SnackBarThemeData(

@@ -8,6 +8,7 @@ import '../../../core/widgets/athletic_ui.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../application/progression_controller.dart';
 import '../domain/progression_models.dart';
+import 'achievements_section.dart';
 
 class ProgressionProfileScreen extends StatelessWidget {
   const ProgressionProfileScreen({super.key});
@@ -287,14 +288,11 @@ class _ProgressionProfileContentState
                   title: 'Достижения',
                   icon: Icons.emoji_events_rounded,
                   iconColor: const Color(0xFFFFB300),
-                  child: profile.recentAchievements.isEmpty
+                  child: profile.recentAchievements.isEmpty &&
+                          profile.achievementCatalog.isEmpty
                       ? const _EmptyHint(
                           'Первые достижения появятся после тренировок и недель прогресса.')
-                      : Column(
-                          children: profile.recentAchievements
-                              .map((item) => _AchievementRow(item: item))
-                              .toList(),
-                        ),
+                      : AchievementsSection(profile: profile),
                 ),
 
                 // ── Последние XP ────────────────────────────────────────
@@ -736,72 +734,6 @@ class _SectionCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────
 // Строки достижений, рекордов, наград
 // ─────────────────────────────────────────────────────────────────
-
-class _AchievementRow extends StatelessWidget {
-  const _AchievementRow({required this.item});
-
-  final AchievementData item;
-
-  static IconData _iconFor(String code) {
-    final c = code.toLowerCase();
-    if (c.contains('streak')) return Icons.local_fire_department_rounded;
-    if (c.contains('pr') || c.contains('record')) {
-      return Icons.emoji_events_rounded;
-    }
-    if (c.contains('month')) return Icons.calendar_month_rounded;
-    if (c.contains('week')) return Icons.date_range_rounded;
-    if (c.contains('workout')) return Icons.fitness_center_rounded;
-    return Icons.star_rounded;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFB300).withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              _iconFor(item.code),
-              size: 18,
-              color: const Color(0xFFFFB300),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  formatShortDate(item.achievedAt),
-                  style: textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _RecordRow extends StatelessWidget {
   const _RecordRow({required this.item, required this.showWeight});

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -67,3 +67,73 @@ class OwnerCoachHistoryMessage(BaseModel):
 
 class OwnerCoachHistoryResponse(BaseModel):
     messages: list[OwnerCoachHistoryMessage]
+
+
+# ── AI usage ──────────────────────────────────────────────────────────────────
+
+class AiUsageFeatureRow(BaseModel):
+    feature: str
+    requests: int
+    cache_hits: int
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class AiUsageReport(BaseModel):
+    days: int
+    requests: int
+    cache_hits: int
+    prompt_tokens: int
+    completion_tokens: int
+    estimated: bool
+    by_feature: list[AiUsageFeatureRow]
+
+
+# ── Progress insights ─────────────────────────────────────────────────────────
+
+class ExerciseSessionInput(BaseModel):
+    date: str
+    weight: float = 0
+    reps: int = 0
+    estimated_1rm: float = 0
+
+
+class ExerciseInsightInput(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    decision: Literal['increase', 'keep', 'decrease', 'stalled', 'insufficient_data']
+    rep_range: str = Field(default='', max_length=20)
+    recommended_weight: float = 0
+    delta_weight: float = 0
+    confidence: float = Field(default=0, ge=0, le=1)
+    sessions: list[ExerciseSessionInput] = Field(default_factory=list, max_length=20)
+
+
+class ProgressInsightsRequest(BaseModel):
+    exercises: list[ExerciseInsightInput] = Field(min_length=1, max_length=50)
+
+
+class ProgressInsightsResponse(BaseModel):
+    explanations: dict[str, str]
+    summary: str
+
+
+# ── Daily insight ─────────────────────────────────────────────────────────────
+
+class DailyInsightResponse(BaseModel):
+    headline: str
+    insight: str
+
+
+# ── Coach memory ──────────────────────────────────────────────────────────────
+
+class CoachMemoryEntry(BaseModel):
+    id: int
+    key: str
+    value: str
+    confidence: float
+    source: str
+    updated_at: str
+
+
+class CoachMemoryResponse(BaseModel):
+    entries: list[CoachMemoryEntry]

@@ -204,7 +204,7 @@ class DashboardCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(18),
-    this.borderRadius = 28,
+    this.borderRadius = 22,
     this.color,
     this.borderColor,
     this.leftAccentColor,
@@ -247,29 +247,13 @@ class DashboardCard extends StatelessWidget {
       );
     }
 
+    // Плоские карточки «Тёмного атлета»: глубину даёт тон поверхности,
+    // а не тени и обводки.
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(borderRadius),
-        color: color ??
-            Color.alphaBlend(
-              scheme.secondary.withValues(alpha: 0.07),
-              scheme.surfaceContainerLow,
-            ),
-        border: Border.all(
-          color: borderColor ?? scheme.outlineVariant.withValues(alpha: 0.22),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: color ?? scheme.surfaceContainerLow,
+        border: borderColor != null ? Border.all(color: borderColor!) : null,
       ),
       child: Material(
         color: Colors.transparent,

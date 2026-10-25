@@ -55,6 +55,16 @@ class ProgressAchievementOut(BaseModel):
     metadata: dict | None = None
 
 
+class AchievementCatalogItemOut(BaseModel):
+    code: str
+    title: str
+    description: str
+    unlocked: bool
+    achievedAt: str | None = None
+    progress: int
+    target: int
+
+
 class ProgressRecordOut(BaseModel):
     exerciseName: str
     recordType: str
@@ -102,6 +112,7 @@ class ProgressionProfileResponse(BaseModel):
     currentWeek: WeekProgressSummary
     currentMonth: MonthProgressSummary
     recentAchievements: list[ProgressAchievementOut]
+    achievementCatalog: list[AchievementCatalogItemOut] = []
     recentRecords: list[ProgressRecordOut]
     allExerciseRecords: list[ExerciseRecordOut]
     recentRewards: list[ProgressRewardOut]

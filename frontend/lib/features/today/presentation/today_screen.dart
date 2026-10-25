@@ -31,6 +31,7 @@ class _TodayScreenState extends State<TodayScreen> {
   _TodayFocus? _todayFocus;
   _TodaySummary _summary = const _TodaySummary.empty();
   WellnessEntry? _todayWellness;
+  _DailyInsight? _dailyInsight;
   int _weeklyTargetFromProfile = _defaultWeeklyTarget;
   bool _draftLoading = true;
   bool _templatesLoading = false;
@@ -50,6 +51,59 @@ class _TodayScreenState extends State<TodayScreen> {
       _loadFitnessProfile().then((_) => _loadSummary()),
       _loadTodayFocus(),
     ]);
+    // Инсайт обновляется в фоне — не блокирует основной экран
+    unawaited(_loadDailyInsight());
+  }
+
+  /// Загружает брифинг коуча с кэшированием на 6 часов.
+  /// При наличии кэша показывает его мгновенно, обновляет в фоне.
+  Future<void> _loadDailyInsight() async {
+    // 1. Мгновенно показываем кэш если есть
+    final cached = LocalCache.get<Map>(CacheKeys.coachDailyInsight);
+    if (cached != null) {
+      final cachedAt = cached['cached_at'] as int?;
+      final headline = cached['headline'] as String?;
+      final insight = cached['insight'] as String?;
+      if (headline != null && insight != null) {
+        if (mounted) {
+          setState(() => _dailyInsight = _DailyInsight(
+                headline: headline,
+                insight: insight,
+              ));
+        }
+        // Кэш актуален если он за сегодня — обновляем только после полуночи
+        if (cachedAt != null) {
+          final cachedDay = DateTime.fromMillisecondsSinceEpoch(cachedAt);
+          final today = DateTime.now();
+          final isSameDay = cachedDay.year == today.year &&
+              cachedDay.month == today.month &&
+              cachedDay.day == today.day;
+          if (isSameDay) return;
+        }
+      }
+    }
+
+    // 2. Запрашиваем свежий инсайт
+    try {
+      final data = await BackendApi.getDailyInsight();
+      if (!mounted || data == null) return;
+      final headline = (data['headline'] as String?)?.trim() ?? '';
+      final insight = (data['insight'] as String?)?.trim() ?? '';
+      if (headline.isEmpty && insight.isEmpty) return;
+      await LocalCache.put(CacheKeys.coachDailyInsight, {
+        'headline': headline,
+        'insight': insight,
+        'cached_at': DateTime.now().millisecondsSinceEpoch,
+      });
+      if (mounted) {
+        setState(() => _dailyInsight = _DailyInsight(
+              headline: headline,
+              insight: insight,
+            ));
+      }
+    } catch (_) {
+      // Не блокируем экран — инсайт опциональный
+    }
   }
 
   Future<void> _loadTodayWellness() async {
@@ -162,8 +216,7 @@ class _TodayScreenState extends State<TodayScreen> {
 
       if (candidateMuscles.isEmpty || !mounted) return;
 
-      final calculator = const MuscleLoadCalculator();
-      final rawLoads = calculator.calculateForWorkouts(
+      final rawLoads = const MuscleLoadCalculator().calculate(
         workouts: thisWeek,
         exerciseCatalog: exerciseCatalog,
       );
@@ -630,11 +683,18 @@ class _TodayScreenState extends State<TodayScreen> {
         throw const FormatException('empty-plan');
       }
 
-      await _openWorkout(
-        date: DateTime.now(),
-        name: plan.name,
-        exercises: initialExercises,
-      );
+      final action = await _showAiWorkoutActionSheet(plan);
+      if (!mounted || action == null) return;
+
+      if (action == _AiWorkoutAction.saveTemplate) {
+        await _saveAiWorkoutAsTemplate(plan, initialExercises);
+      } else {
+        await _openWorkout(
+          date: DateTime.now(),
+          name: plan.name,
+          exercises: initialExercises,
+        );
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -653,6 +713,90 @@ class _TodayScreenState extends State<TodayScreen> {
       if (mounted) {
         setState(() => _aiCoachLoading = false);
       }
+    }
+  }
+
+  Future<_AiWorkoutAction?> _showAiWorkoutActionSheet(
+    _AiCoachWorkoutPlan plan,
+  ) {
+    return showModalBottomSheet<_AiWorkoutAction>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                plan.name,
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                plan.exercises.map((e) => e.exerciseName).join(' · '),
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _AiWorkoutAction.startNow),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Начать тренировку'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _AiWorkoutAction.saveTemplate),
+                  icon: const Icon(Icons.bookmark_add_outlined),
+                  label: const Text('Сохранить как шаблон'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveAiWorkoutAsTemplate(
+    _AiCoachWorkoutPlan plan,
+    List<Map<String, dynamic>> builtExercises,
+  ) async {
+    final templateExercises = List.generate(plan.exercises.length, (i) {
+      final planEx = plan.exercises[i];
+      final built = i < builtExercises.length ? builtExercises[i] : null;
+      return {
+        'catalog_exercise_id': built?['catalog_exercise_id'],
+        'exercise_name':
+            (built?['exercise_name'] ?? planEx.exerciseName).toString(),
+        'position': i + 1,
+        'target_sets': planEx.sets,
+        'target_reps': planEx.reps,
+        'target_weight': null,
+      };
+    });
+    await BackendApi.createTemplate(
+      name: plan.name,
+      exercises: const [],
+      templateExercises: templateExercises,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Шаблон «${plan.name}» сохранён')),
+      );
     }
   }
 
@@ -920,6 +1064,7 @@ class _TodayScreenState extends State<TodayScreen> {
                       SizedBox(height: isTall ? 20 : 12),
                       _WorkoutDayCard(
                         focus: _todayFocus,
+                        dailyInsight: _dailyInsight,
                         templatesLoading: _templatesLoading,
                         aiCoachLoading: _aiCoachLoading,
                         onStartWorkout: () =>
@@ -1249,6 +1394,7 @@ class _WeekSummaryCard extends StatelessWidget {
 class _WorkoutDayCard extends StatelessWidget {
   const _WorkoutDayCard({
     required this.focus,
+    required this.dailyInsight,
     required this.templatesLoading,
     required this.aiCoachLoading,
     required this.onStartWorkout,
@@ -1257,6 +1403,7 @@ class _WorkoutDayCard extends StatelessWidget {
   });
 
   final _TodayFocus? focus;
+  final _DailyInsight? dailyInsight;
   final bool templatesLoading;
   final bool aiCoachLoading;
   final VoidCallback onStartWorkout;
@@ -1267,6 +1414,13 @@ class _WorkoutDayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
+    // Определяем заголовок: AI-инсайт приоритетнее алгоритма
+    final headline = dailyInsight?.headline.isNotEmpty == true
+        ? dailyInsight!.headline
+        : (focus != null && !focus!.isStartState)
+            ? focus!.recommendedLabel
+            : focus?.motivationHeadline;
+
     return DashboardCard(
       color: Color.alphaBlend(
         scheme.secondary.withValues(alpha: 0.06),
@@ -1276,19 +1430,21 @@ class _WorkoutDayCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (focus != null && !focus!.isStartState) ...[
-            // ── Рекомендация на основе нагрузки ──────────
+          if (headline != null) ...[
+            // ── Заголовок (AI или алгоритм) ──────────────
             Text(
-              'РЕКОМЕНДУЕМ',
+              dailyInsight != null ? 'AI-КОУЧ' : 'РЕКОМЕНДУЕМ',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    color: dailyInsight != null
+                        ? scheme.primary.withValues(alpha: 0.75)
+                        : scheme.onSurfaceVariant.withValues(alpha: 0.7),
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.4,
                   ),
             ),
             const SizedBox(height: 4),
             Text(
-              focus!.recommendedLabel!,
+              headline,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontFamily: 'Bebas Neue Cyrillic',
                     fontSize: 32,
@@ -1296,19 +1452,19 @@ class _WorkoutDayCard extends StatelessWidget {
                     height: 1.0,
                   ),
             ),
-            const SizedBox(height: 14),
-          ] else if (focus != null && focus!.isStartState) ...[
-            // ── Старт недели ──────────────────────────────
-            Text(
-              focus!.motivationHeadline!,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontFamily: 'Bebas Neue Cyrillic',
-                    fontSize: 32,
-                    letterSpacing: 1.0,
-                    height: 1.0,
-                  ),
-            ),
-            if (focus!.motivationSubtext != null) ...[
+            // ── Текст инсайта (только если есть AI-ответ) ─
+            if (dailyInsight?.insight.isNotEmpty == true) ...[
+              const SizedBox(height: 6),
+              Text(
+                dailyInsight!.insight,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+              ),
+            ] else if (focus != null &&
+                focus!.isStartState &&
+                focus!.motivationSubtext != null) ...[
               const SizedBox(height: 4),
               Text(
                 focus!.motivationSubtext!,
@@ -1444,6 +1600,8 @@ enum _AiCoachIntensity {
 
   String get rangeLabel => '$minExercises-$maxExercises';
 }
+
+enum _AiWorkoutAction { startNow, saveTemplate }
 
 class _AiCoachWorkoutPlan {
   const _AiCoachWorkoutPlan({
@@ -1817,6 +1975,12 @@ class _TodayQuote extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DailyInsight {
+  const _DailyInsight({required this.headline, required this.insight});
+  final String headline;
+  final String insight;
 }
 
 String _normalizeExerciseLookupName(String value) {

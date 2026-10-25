@@ -34,12 +34,11 @@ class SyncService {
       }
     }
 
-    // обновляем кэш тренировок после успешной синхронизации
+    // обновляем кэш тренировок в фоне, не блокируя завершение drain
     if (OfflineQueue.isEmpty) {
-      try {
-        final fresh = await BackendApi.getWorkouts();
-        await LocalCache.put(CacheKeys.workoutsCache, fresh);
-      } catch (_) {}
+      BackendApi.getWorkouts()
+          .then((fresh) => LocalCache.put(CacheKeys.workoutsCache, fresh))
+          .catchError((_) {});
     }
   }
 

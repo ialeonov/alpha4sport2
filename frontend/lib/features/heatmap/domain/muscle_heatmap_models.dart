@@ -32,12 +32,12 @@ class TopMuscleLoad {
   const TopMuscleLoad({
     required this.muscle,
     required this.label,
-    required this.rawLoad,
-    required this.normalizedLoad,
+    required this.load,
   });
 
   final String muscle;
   final String label;
-  final double rawLoad;
-  final double normalizedLoad;
+
+  /// Эффективные подходы.
+  final double load;
 }

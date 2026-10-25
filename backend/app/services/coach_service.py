@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import re
 from collections import Counter
@@ -10,16 +11,20 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import delete, func, select, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import Integer, delete, func, select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import settings
+from app.models.ai_usage import AiResponseCache, AiUsageEvent
 from app.models.body import BodyEntry
 from app.models.coach import CoachChatMessage
+from app.models.coach_memory import CoachUserMemory
+from app.models.progression import ProgressExerciseRecord, UserProgression
 from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.workout import ExerciseCatalog, ExerciseSet, Workout, WorkoutExercise
 from app.services.account_event_service import display_name_for_user
+from app.services.muscle_load import MuscleLoadCalculator
 
 
 class CoachServiceError(Exception):
@@ -27,6 +32,16 @@ class CoachServiceError(Exception):
 
 
 _APP_DISPLAY_NAME = 'Путь Силы'
+
+# Лимиты ответа — защищают от многословных (и дорогих) ответов модели.
+_CHAT_MAX_TOKENS = 900
+_SHORT_MAX_TOKENS = 350
+_WORKOUT_MAX_TOKENS = 1400
+
+
+def _estimate_tokens(text_value: str) -> int:
+    # Грубая оценка для русского текста и JSON: ~3 символа на токен.
+    return max(0, round(len(text_value) / 3))
 _APP_TIMEZONE = ZoneInfo('Europe/Moscow')
 
 # ── Мышечные тиры ─────────────────────────────────────────────────────────────
@@ -118,7 +133,10 @@ class CoachService:
                 context_summary=context_summary,
                 messages=messages,
                 wellness_entries=wellness_entries,
-            )
+            ),
+            feature='chat',
+            user_id=user.id,
+            max_tokens=_CHAT_MAX_TOKENS,
         )
         return {
             'reply': content,
@@ -155,7 +173,10 @@ class CoachService:
             user_notes=user_notes,
             wellness_entries=wellness_entries,
         )
-        content, model = await self._request_completion(llm_messages, temperature=0.25)
+        content, model = await self._request_completion(
+            llm_messages, temperature=0.25, feature='generate_workout',
+            user_id=user.id, max_tokens=_WORKOUT_MAX_TOKENS,
+        )
 
         available_exercises = (
             context_summary.get('trainingSummary', {}).get('availableExercises') or []
@@ -191,7 +212,10 @@ class CoachService:
                 {'role': 'assistant', 'content': content},
                 {'role': 'user', 'content': retry_message},
             ]
-            content, model = await self._request_completion(retry_messages, temperature=0.25)
+            content, model = await self._request_completion(
+                retry_messages, temperature=0.25, feature='generate_workout_retry',
+                user_id=user.id, max_tokens=_WORKOUT_MAX_TOKENS,
+            )
             validated_data, _ = self._parse_and_validate_workout(
                 content, available_names, blocked_muscles, exercise_to_muscle,
                 min_exercises, max_exercises,
@@ -372,6 +396,141 @@ class CoachService:
         self.db.execute(delete(CoachChatMessage).where(CoachChatMessage.user_id == user_id))
         self.db.commit()
 
+    async def update_memory_from_exchange(
+        self,
+        *,
+        user_id: int,
+        user_text: str,
+        assistant_text: str,
+    ) -> None:
+        """Извлекает наблюдения из диалога и сохраняет в долгосрочную память коуча.
+
+        Запускается как фоновая задача — не блокирует ответ пользователю.
+        Вызов LLM делается только если в сообщении вероятно есть факт о
+        пользователе — короткие вопросы и реплики пропускаются (экономия).
+        """
+        if not _may_contain_personal_fact(user_text):
+            return
+        existing_memory = list(
+            self.db.scalars(
+                select(CoachUserMemory)
+                .where(CoachUserMemory.user_id == user_id)
+                .order_by(CoachUserMemory.updated_at.desc())
+                .limit(30)
+            )
+        )
+        existing_summary = (
+            '\n'.join(f'- {m.key}: {m.value}' for m in existing_memory)
+            if existing_memory
+            else 'Нет сохранённых наблюдений.'
+        )
+
+        system_msg = (
+            'Ты — система извлечения фактов о пользователе для персонального фитнес-коуча. '
+            'Найди в реплике пользователя ТОЛЬКО новые, конкретные факты, полезные для тренировок '
+            'через месяц и дольше. Не дублируй уже известное — если факт уточняет существующий, '
+            'используй тот же key.\n'
+            'Сохраняй: цели, травмы и ограничения, предпочтения в упражнениях и расписании, '
+            'доступное оборудование, устойчивые реакции на нагрузку, режим сна и работы.\n'
+            'НЕ сохраняй: оценки самочувствия за сегодня (сон/энергия/настроение), разовые события '
+            '(праздник, похмелье, поездка), эмоции, увлечения не про спорт, то, что сказал коуч.\n\n'
+            'Существующая память:\n'
+            f'{existing_summary}\n\n'
+            'Верни строго валидный JSON-массив (может быть пустым):\n'
+            '[{"key": "snake_case_ключ", "value": "краткое описание на русском", "confidence": 0.0-1.0}]\n'
+            'Максимум 3 записи. Если новых фактов нет — верни [].'
+        )
+        user_msg = (
+            f'Пользователь написал: «{user_text[:800]}»\n'
+            f'Коуч ответил (контекст, факты отсюда не брать): «{assistant_text[:300]}»'
+        )
+
+        try:
+            content, _ = await self._request_completion(
+                messages=[
+                    {'role': 'system', 'content': system_msg},
+                    {'role': 'user', 'content': user_msg},
+                ],
+                temperature=0.2,
+                feature='memory',
+                user_id=user_id,
+                light=True,
+                max_tokens=250,
+            )
+        except CoachServiceError:
+            return
+
+        try:
+            clean = content.strip()
+            if clean.startswith('```'):
+                clean = re.sub(r'^```[a-z]*\n?', '', clean)
+                clean = re.sub(r'\n?```$', '', clean.strip())
+            facts: list[dict] = json.loads(clean)
+            if not isinstance(facts, list):
+                return
+        except (json.JSONDecodeError, ValueError):
+            return
+
+        now = datetime.now(timezone.utc)
+        for fact in facts[:3]:
+            key = str(fact.get('key') or '').strip()[:80]
+            value = str(fact.get('value') or '').strip()
+            confidence = float(fact.get('confidence') or 0.8)
+            if not key or not value:
+                continue
+            existing = self.db.scalar(
+                select(CoachUserMemory).where(
+                    CoachUserMemory.user_id == user_id,
+                    CoachUserMemory.key == key,
+                )
+            )
+            if existing:
+                existing.value = value
+                existing.confidence = min(1.0, confidence)
+                existing.updated_at = now
+            else:
+                self.db.add(CoachUserMemory(
+                    user_id=user_id,
+                    key=key,
+                    value=value,
+                    confidence=min(1.0, confidence),
+                    source='chat',
+                    created_at=now,
+                    updated_at=now,
+                ))
+        try:
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+
+    def list_memory(self, *, user_id: int) -> list[CoachUserMemory]:
+        return list(
+            self.db.scalars(
+                select(CoachUserMemory)
+                .where(CoachUserMemory.user_id == user_id)
+                .order_by(CoachUserMemory.updated_at.desc())
+            )
+        )
+
+    def delete_memory_entry(self, *, user_id: int, memory_id: int) -> bool:
+        entry = self.db.scalar(
+            select(CoachUserMemory).where(
+                CoachUserMemory.id == memory_id,
+                CoachUserMemory.user_id == user_id,
+            )
+        )
+        if entry is None:
+            return False
+        self.db.delete(entry)
+        self.db.commit()
+        return True
+
+    def clear_memory(self, *, user_id: int) -> None:
+        self.db.execute(
+            delete(CoachUserMemory).where(CoachUserMemory.user_id == user_id)
+        )
+        self.db.commit()
+
     async def reply_stream(
         self,
         *,
@@ -385,38 +544,109 @@ class CoachService:
             messages=messages,
             wellness_entries=wellness_entries,
         )
-        async for chunk in self._request_completion_stream(chat_messages):
+        async for chunk in self._request_completion_stream(
+            chat_messages, feature='chat', user_id=user.id, max_tokens=_CHAT_MAX_TOKENS,
+        ):
             yield chunk
 
-    async def _request_completion_stream(
-        self,
-        messages: list[dict[str, str]],
-        temperature: float | None = None,
-    ):
-        if not settings.ai_coach_api_key or not settings.ai_coach_model:
-            raise CoachServiceError('AI-коуч не настроен на сервере.')
+    # ── LLM transport ────────────────────────────────────────────────────────
 
-        payload = {
-            'model': settings.ai_coach_model,
-            'messages': messages,
-            'temperature': temperature if temperature is not None else settings.ai_coach_temperature,
-            'stream': True,
-        }
+    @staticmethod
+    def _llm_target(light: bool) -> tuple[str, str, str]:
+        """(base_url, api_key, model) — лёгкая модель, если настроена."""
+        if light and settings.ai_coach_light_model:
+            return (
+                settings.ai_coach_light_base_url or settings.ai_coach_base_url,
+                settings.ai_coach_light_api_key or settings.ai_coach_api_key,
+                settings.ai_coach_light_model,
+            )
+        return settings.ai_coach_base_url, settings.ai_coach_api_key, settings.ai_coach_model
+
+    @staticmethod
+    def _llm_headers(api_key: str) -> dict[str, str]:
         headers = {
-            'Authorization': f'Bearer {settings.ai_coach_api_key}',
+            'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
         }
         if settings.ai_coach_referer:
             headers['HTTP-Referer'] = settings.ai_coach_referer
         if settings.ai_coach_title:
             headers['X-Title'] = settings.ai_coach_title
+        return headers
 
-        endpoint = f'{settings.ai_coach_base_url.rstrip("/")}/chat/completions'
+    def _log_usage(
+        self,
+        *,
+        feature: str,
+        user_id: int | None,
+        model: str,
+        messages: list[dict[str, str]] | None = None,
+        completion: str = '',
+        usage: dict | None = None,
+        cache_hit: bool = False,
+    ) -> None:
+        """Пишет расход токенов. Если провайдер не вернул usage — оценивает."""
+        prompt_tokens = int((usage or {}).get('prompt_tokens') or 0)
+        completion_tokens = int((usage or {}).get('completion_tokens') or 0)
+        estimated = False
+        if not cache_hit and not usage:
+            prompt_tokens = _estimate_tokens(
+                ''.join(m.get('content', '') for m in messages or [])
+            )
+            completion_tokens = _estimate_tokens(completion)
+            estimated = True
+        try:
+            self.db.add(AiUsageEvent(
+                user_id=user_id,
+                feature=feature,
+                model=(model or '')[:120],
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                estimated=estimated,
+                cache_hit=cache_hit,
+                created_at=datetime.now(timezone.utc),
+            ))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+
+    async def _request_completion_stream(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        *,
+        feature: str = 'chat',
+        user_id: int | None = None,
+        max_tokens: int | None = None,
+    ):
+        base_url, api_key, model = self._llm_target(light=False)
+        if not api_key or not model:
+            raise CoachServiceError('AI-коуч не настроен на сервере.')
+
+        payload: dict[str, Any] = {
+            'model': model,
+            'messages': messages,
+            'temperature': temperature if temperature is not None else settings.ai_coach_temperature,
+            'stream': True,
+        }
+        if max_tokens:
+            payload['max_tokens'] = max_tokens
+
+        endpoint = f'{base_url.rstrip("/")}/chat/completions'
         timeout = httpx.Timeout(settings.ai_coach_timeout_seconds)
+        full_text = ''
+        usage: dict | None = None
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream('POST', endpoint, headers=headers, json=payload) as response:
-                    response.raise_for_status()
+                async with client.stream(
+                    'POST', endpoint, headers=self._llm_headers(api_key), json=payload,
+                ) as response:
+                    if response.status_code >= 400:
+                        detail = (await response.aread()).decode('utf-8', 'replace').strip()
+                        raise CoachServiceError(
+                            f'LLM провайдер вернул ошибку {response.status_code}: '
+                            f'{detail or "пустой ответ"}'
+                        )
                     async for line in response.aiter_lines():
                         if not line.startswith('data: '):
                             continue
@@ -425,47 +655,51 @@ class CoachService:
                             break
                         try:
                             parsed = json.loads(data)
-                            chunk = parsed.get('choices', [{}])[0].get('delta', {}).get('content') or ''
-                            if chunk:
-                                yield chunk
                         except json.JSONDecodeError:
-                            pass
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text.strip()
-            raise CoachServiceError(
-                f'LLM провайдер вернул ошибку {exc.response.status_code}: '
-                f'{detail or "пустой ответ"}'
-            ) from exc
+                            continue
+                        if parsed.get('usage'):
+                            usage = parsed['usage']
+                        choices = parsed.get('choices') or [{}]
+                        chunk = (choices[0].get('delta') or {}).get('content') or ''
+                        if chunk:
+                            full_text += chunk
+                            yield chunk
         except httpx.HTTPError as exc:
             raise CoachServiceError('Не удалось связаться с LLM провайдером.') from exc
+        finally:
+            if full_text:
+                self._log_usage(
+                    feature=feature, user_id=user_id, model=model,
+                    messages=messages, completion=full_text, usage=usage,
+                )
 
     async def _request_completion(
         self,
         messages: list[dict[str, str]],
         temperature: float | None = None,
+        *,
+        feature: str = 'other',
+        user_id: int | None = None,
+        light: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[str, str]:
-        if not settings.ai_coach_api_key or not settings.ai_coach_model:
+        base_url, api_key, model = self._llm_target(light=light)
+        if not api_key or not model:
             raise CoachServiceError('AI-коуч не настроен на сервере.')
 
-        payload = {
-            'model': settings.ai_coach_model,
+        payload: dict[str, Any] = {
+            'model': model,
             'messages': messages,
             'temperature': temperature if temperature is not None else settings.ai_coach_temperature,
         }
-        headers = {
-            'Authorization': f'Bearer {settings.ai_coach_api_key}',
-            'Content-Type': 'application/json',
-        }
-        if settings.ai_coach_referer:
-            headers['HTTP-Referer'] = settings.ai_coach_referer
-        if settings.ai_coach_title:
-            headers['X-Title'] = settings.ai_coach_title
+        if max_tokens:
+            payload['max_tokens'] = max_tokens
 
-        endpoint = f'{settings.ai_coach_base_url.rstrip("/")}/chat/completions'
+        endpoint = f'{base_url.rstrip("/")}/chat/completions'
         timeout = httpx.Timeout(settings.ai_coach_timeout_seconds)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(endpoint, headers=headers, json=payload)
+                response = await client.post(endpoint, headers=self._llm_headers(api_key), json=payload)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text.strip()
@@ -478,9 +712,285 @@ class CoachService:
 
         data = response.json()
         content = data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+        used_model = data.get('model') or model
+        self._log_usage(
+            feature=feature, user_id=user_id, model=used_model,
+            messages=messages, completion=content, usage=data.get('usage'),
+        )
         if not content:
             raise CoachServiceError('LLM провайдер вернул пустой ответ.')
-        return content, data.get('model') or settings.ai_coach_model
+        return content, used_model
+
+    def usage_report(self, *, days: int) -> dict:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = self.db.execute(
+            select(
+                AiUsageEvent.feature,
+                func.count().label('requests'),
+                func.sum(func.cast(AiUsageEvent.cache_hit, Integer)).label('cache_hits'),
+                func.coalesce(func.sum(AiUsageEvent.prompt_tokens), 0).label('prompt'),
+                func.coalesce(func.sum(AiUsageEvent.completion_tokens), 0).label('completion'),
+                func.max(func.cast(AiUsageEvent.estimated, Integer)).label('estimated'),
+            )
+            .where(AiUsageEvent.created_at >= since)
+            .group_by(AiUsageEvent.feature)
+            .order_by(func.sum(AiUsageEvent.prompt_tokens).desc())
+        ).all()
+        by_feature = [
+            {
+                'feature': row.feature,
+                'requests': int(row.requests or 0),
+                'cache_hits': int(row.cache_hits or 0),
+                'prompt_tokens': int(row.prompt or 0),
+                'completion_tokens': int(row.completion or 0),
+            }
+            for row in rows
+        ]
+        return {
+            'days': days,
+            'requests': sum(r['requests'] for r in by_feature),
+            'cache_hits': sum(r['cache_hits'] for r in by_feature),
+            'prompt_tokens': sum(r['prompt_tokens'] for r in by_feature),
+            'completion_tokens': sum(r['completion_tokens'] for r in by_feature),
+            'estimated': any(int(row.estimated or 0) for row in rows),
+            'by_feature': by_feature,
+        }
+
+    # ── Server-side response cache ───────────────────────────────────────────
+
+    def _cache_get(self, *, user_id: int, feature: str, key: str, max_age: timedelta) -> str | None:
+        row = self.db.scalar(
+            select(AiResponseCache).where(
+                AiResponseCache.user_id == user_id,
+                AiResponseCache.feature == feature,
+                AiResponseCache.cache_key == key,
+            )
+        )
+        if row is None:
+            return None
+        created = row.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created > max_age:
+            return None
+        self._log_usage(feature=feature, user_id=user_id, model='cache', cache_hit=True)
+        return row.content
+
+    def _cache_put(self, *, user_id: int, feature: str, key: str, content: str) -> None:
+        try:
+            # Одна актуальная запись на функцию — старые ключи не нужны.
+            self.db.execute(
+                delete(AiResponseCache).where(
+                    AiResponseCache.user_id == user_id,
+                    AiResponseCache.feature == feature,
+                )
+            )
+            self.db.add(AiResponseCache(
+                user_id=user_id,
+                feature=feature,
+                cache_key=key,
+                content=content,
+                created_at=datetime.now(timezone.utc),
+            ))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+
+    async def generate_daily_insight(self, *, user: User) -> dict:
+        """Генерирует краткий ежедневный брифинг коуча для главного экрана.
+
+        Возвращает:
+            headline  — заглавие (мышцы/фокус), напр. "НОГИ И СПИНА"
+            insight   — 2-3 предложения: что делать сегодня + глобальное наблюдение
+
+        Кэшируется на сервере до конца дня или до следующей тренировки, поэтому
+        повторные открытия приложения (в т.ч. с других устройств) бесплатны.
+        """
+        today = datetime.now(_APP_TIMEZONE).date()
+        last_workout_id = self.db.scalar(
+            select(func.max(Workout.id)).where(Workout.user_id == user.id)
+        ) or 0
+        cache_key = f'{today.isoformat()}:{last_workout_id}'
+        cached = self._cache_get(
+            user_id=user.id, feature='daily_insight', key=cache_key, max_age=timedelta(hours=24),
+        )
+        if cached:
+            try:
+                return json.loads(cached)
+            except json.JSONDecodeError:
+                pass
+
+        context = _compact_context_for_llm(self._build_context_summary(user), max_workouts=5)
+
+        # Прошлый брифинг (лежит в кэше под старым ключом) — чтобы модель не
+        # повторяла одно и то же наблюдение день за днём.
+        previous_row = self.db.scalar(
+            select(AiResponseCache).where(
+                AiResponseCache.user_id == user.id,
+                AiResponseCache.feature == 'daily_insight',
+            )
+        )
+        previous_insight = ''
+        if previous_row is not None:
+            previous_insight = str(
+                (_parse_json_object(previous_row.content) or {}).get('insight') or ''
+            )[:400]
+        avoid_repeat = (
+            f'Прошлый брифинг был таким: «{previous_insight}». Во втором предложении '
+            'выбери ДРУГОЕ упражнение или другую тему, чем в прошлый раз.\n'
+            if previous_insight
+            else ''
+        )
+
+        system_msg = (
+            f'Ты персональный фитнес-коуч приложения "{_APP_DISPLAY_NAME}". '
+            f'Сегодня {today.isoformat()}. '
+            'На основе данных пользователя напиши КРАТКИЙ ежедневный брифинг — '
+            'ровно 2 предложения на русском языке.\n\n'
+            'Предложение 1: какие мышечные группы стоит потренировать сегодня и почему '
+            '(используй muscleDistribution: давность и effectiveSets7d — недельный объём; '
+            'ориентир для роста 10–20 эффективных подходов на мышцу в неделю).\n'
+            'Предложение 2: одно ГЛОБАЛЬНОЕ наблюдение о тренировочном процессе пользователя — '
+            'прогресс или застой в упражнении (бери любое из progressionTrends и recentWorkouts, '
+            'не обязательно самое тяжёлое), накопленная усталость, стрик, '
+            'дисбаланс групп мышц, или что-то значимое из истории. '
+            'Используй конкретные цифры. Не давай общих советов.\n'
+            f'{avoid_repeat}\n'
+            'Также выдели headline — 1-3 слова заглавными буквами (мышечные группы или тема дня), '
+            'напр. "НОГИ И СПИНА", "ГРУДЬ", "ДЕНЬ ОТДЫХА", "РЕКОРД БЛИЗКО".\n\n'
+            'Верни строго валидный JSON без markdown:\n'
+            '{"headline": "...", "insight": "..."}'
+        )
+        user_msg = f'Данные пользователя:\n{json.dumps(context, ensure_ascii=False)}'
+
+        content, _ = await self._request_completion(
+            messages=[
+                {'role': 'system', 'content': system_msg},
+                {'role': 'user', 'content': user_msg},
+            ],
+            temperature=0.6,
+            feature='daily_insight',
+            user_id=user.id,
+            light=True,
+            max_tokens=_SHORT_MAX_TOKENS,
+        )
+
+        parsed = _parse_json_object(content)
+        if parsed is not None:
+            result = {
+                'headline': str(parsed.get('headline') or 'ТРЕНИРОВКА').strip().upper(),
+                'insight': str(parsed.get('insight') or '').strip(),
+            }
+        else:
+            result = {'headline': 'ТРЕНИРОВКА', 'insight': content[:300].strip()}
+        if result['insight']:
+            self._cache_put(
+                user_id=user.id, feature='daily_insight', key=cache_key,
+                content=json.dumps(result, ensure_ascii=False),
+            )
+        return result
+
+    async def generate_progress_insights(
+        self,
+        exercises: list[dict],
+        *,
+        user_id: int | None = None,
+    ) -> dict:
+        """Генерирует общий комментарий коуча по рекомендациям прогрессии.
+
+        Пояснения к отдельным упражнениям не генерируются (поле explanations
+        всегда пустое и оставлено для совместимости со старыми клиентами).
+
+        Args:
+            exercises: список словарей с ключами:
+                - name: str
+                - decision: "increase" | "keep" | "decrease" | "stalled" | "insufficient_data"
+                - rep_range: str (напр. "6-10")
+                - recommended_weight: float
+                - delta_weight: float
+                - confidence: float (0-1)
+                - sessions: list of {date, weight, reps, estimated_1rm}
+
+        Returns:
+            dict с ключами:
+                - explanations: {} (всегда пусто)
+                - summary: str (общее наблюдение по всем упражнениям)
+        """
+        if not exercises:
+            return {'explanations': {}, 'summary': ''}
+
+        cache_key = hashlib.sha256(
+            json.dumps(exercises, ensure_ascii=False, sort_keys=True).encode('utf-8')
+        ).hexdigest()
+        if user_id is not None:
+            cached = self._cache_get(
+                user_id=user_id, feature='progress_summary', key=cache_key,
+                max_age=timedelta(days=7),
+            )
+            if cached is not None:
+                return {'explanations': {}, 'summary': cached}
+
+        _DECISION_LABELS = {
+            'increase': 'ПОВЫСИТЬ ВЕС',
+            'keep': 'ДЕРЖАТЬ ВЕС',
+            'decrease': 'СНИЗИТЬ ВЕС',
+            'stalled': 'ЗАСТОЙ',
+            'insufficient_data': 'МАЛО ДАННЫХ',
+        }
+
+        lines: list[str] = []
+        for ex in exercises:
+            sessions = (ex.get('sessions') or [])[-3:]
+            sessions_text = ', '.join(
+                f"{s.get('date', '?')}: {s.get('weight', 0)}кг×{s.get('reps', 0)}"
+                for s in sessions
+            )
+            label = _DECISION_LABELS.get(ex.get('decision', 'keep'), 'ДЕРЖАТЬ ВЕС')
+            delta = ex.get('delta_weight', 0.0)
+            delta_str = f'+{delta}кг' if delta > 0 else (f'{delta}кг' if delta < 0 else '')
+            rec_weight = ex.get('recommended_weight', 0)
+            rep_range = ex.get('rep_range', '?')
+            lines.append(
+                f'- {ex["name"]}: {label} → {rec_weight}кг'
+                f'{f" ({delta_str})" if delta_str else ""}, '
+                f'диапазон {rep_range} повт'
+                f'{f", последние сессии: [{sessions_text}]" if sessions_text else ""}'
+            )
+
+        exercises_block = '\n'.join(lines)
+
+        system_msg = (
+            'Ты персональный фитнес-коуч. '
+            'Ниже — рекомендации по рабочим весам для упражнений пользователя. '
+            'Дай одно общее наблюдение по всей картине прогресса: 2-3 предложения, '
+            'конкретно, на русском языке, как живой тренер. '
+            'Назови главное: где идёт рост, где застой и на что обратить внимание. '
+            'Не разбирай каждое упражнение по отдельности и не перечисляй их списком.\n\n'
+            'Верни строго валидный JSON без markdown-блоков: {"summary": "общее наблюдение"}'
+        )
+        user_msg = f'Упражнения для анализа:\n{exercises_block}'
+
+        content, _ = await self._request_completion(
+            messages=[
+                {'role': 'system', 'content': system_msg},
+                {'role': 'user', 'content': user_msg},
+            ],
+            temperature=0.5,
+            feature='progress_summary',
+            user_id=user_id,
+            light=True,
+            max_tokens=_SHORT_MAX_TOKENS,
+        )
+
+        parsed = _parse_json_object(content)
+        summary = (
+            str(parsed.get('summary', '')).strip() if parsed is not None else content[:600].strip()
+        )
+        if user_id is not None and summary:
+            self._cache_put(
+                user_id=user_id, feature='progress_summary', key=cache_key, content=summary,
+            )
+        return {'explanations': {}, 'summary': summary}
 
     def _build_chat_messages(
         self,
@@ -491,22 +1001,25 @@ class CoachService:
     ) -> list[dict[str, str]]:
         today = datetime.now(_APP_TIMEZONE).date()
         system_prompt = settings.ai_coach_system_prompt.strip() or (
-            f'Ты персональный фитнес-коуч внутри приложения "{_APP_DISPLAY_NAME}". '
-            'Отвечай на русском языке, дружелюбно и конкретно. '
-            'Опирайся только на предоставленную статистику пользователя. '
-            'Если данных недостаточно, прямо скажи об этом. '
-            'Не выдумывай медицинские диагнозы и не заменяй врача. '
-            'Давай практические рекомендации по тренировкам, восстановлению и нагрузке. '
-            'Для рекомендаций по упражнениям используй прежде всего упражнения из персонального каталога '
-            'пользователя и из его недавних тренировок. Не предлагай упражнения, которых нет в его доступном '
-            'списке, если только пользователь прямо не просит альтернативу. '
-            'При анализе опирайся на: частоту тренировок, распределение мышечных групп, recentWorkouts, '
-            'muscleDistribution, состав упражнений, число рабочих подходов, длительность тренировок и восстановление. '
-            'В muscleDistribution поле recentSets7d — это суммарное число подходов на данную мышцу за последние 7 дней (не за одну тренировку). '
-            'Тоннаж — вторичный и шумный показатель. Не делай по тоннажу главный вывод о качестве тренировки. '
-            'RPE в подходах — сигнал интенсивности: RPE 7 умеренно, 8-9 тяжело, 10 до отказа. '
-            'Учитывай RPE при оценке усталости и восстановления. '
-            'Не переспрашивай и не уточняй — дай лучший ответ на основе имеющихся данных.'
+            f'Ты персональный фитнес-коуч в приложении "{_APP_DISPLAY_NAME}". '
+            'Отвечай по-русски, дружелюбно, конкретно и коротко: обычно 3–8 предложений или '
+            'короткий список. Длинные планы — только если пользователь просит.\n'
+            'Правила:\n'
+            '- Опирайся только на данные пользователя ниже; если данных мало — так и скажи. '
+            'Не ставь диагнозов и не заменяй врача.\n'
+            '- Упражнения предлагай из его недавних тренировок (recentWorkouts) и рекордов; '
+            'другие — только если он просит альтернативу.\n'
+            '- Объём по мышцам: muscleDistribution.effectiveSets7d — эффективные подходы за 7 дней '
+            '(разминки не считаются, лёгкие подходы частично). Ориентир для роста — 10–20 в неделю. '
+            'Эти же цифры пользователь видит в приложении на вкладке «Прогресс → Мышцы».\n'
+            '- Тоннаж — шумный показатель, не делай по нему главных выводов. '
+            'RPE: 7 — умеренно, 8–9 — тяжело, 10 — отказ.\n'
+            '- Рабочие веса считай от exerciseRecords (1ПМ): например 75–85% для 6–10 повторов.\n'
+            '- Учитывай fitnessProfile (цели, травмы, возраст 40+ — дольше восстановление, '
+            'coachNotes, preferredDays), stats (стрик, рекорды — отмечай достижения) '
+            'и coachMemory (устойчивые факты о пользователе).\n'
+            '- В recentWorkouts подходы записаны как 80kg×8r@8 (вес×повторы@RPE), WU — разминка.\n'
+            '- Не переспрашивай — дай лучший ответ по имеющимся данным.'
         )
         runtime_prompt = (
             f'Текущая дата: {today.isoformat()} '
@@ -515,14 +1028,9 @@ class CoachService:
             'ориентируйся именно на эту дату.'
         )
         wellness_log = _format_wellness_for_context(wellness_entries)
-        context_with_wellness = {**context_summary}
+        context_with_wellness = _compact_context_for_llm(context_summary, max_workouts=8)
         if wellness_log:
             context_with_wellness['wellnessLog'] = wellness_log
-        # Для чата достаточно topExercisesRecent + muscleDistribution; полный каталог не нужен
-        if 'trainingSummary' in context_with_wellness:
-            ts = {**context_with_wellness['trainingSummary']}
-            ts.pop('availableExercises', None)
-            context_with_wellness['trainingSummary'] = ts
         context_prompt = (
             'Ниже краткий профиль и сводка по пользователю. Используй это как источник контекста.\n'
             f'{json.dumps(context_with_wellness, ensure_ascii=False)}'
@@ -534,12 +1042,23 @@ class CoachService:
             if wellness_note
             else None
         )
+        # Последние N сообщений; старые длинные ответы коуча обрезаем — модели
+        # нужен ход разговора, а не полный текст прошлых советов.
+        window = messages[-max(2, settings.ai_coach_history_messages):]
+        history = [
+            {**m, 'content': m['content'][:1500]}
+            if m.get('role') == 'assistant' and i < len(window) - 1
+            else m
+            for i, m in enumerate(window)
+        ]
+        # Стабильный системный промпт идёт первым — так провайдеры с кэшированием
+        # префикса (prompt caching) могут переиспользовать его между запросами.
         return [
             {'role': 'system', 'content': system_prompt},
-            {'role': 'system', 'content': runtime_prompt},
             {'role': 'system', 'content': context_prompt},
+            {'role': 'system', 'content': runtime_prompt},
             *([{'role': 'system', 'content': wellness_system}] if wellness_system else []),
-            *messages,
+            *history,
         ]
 
     def _build_workout_generation_messages(
@@ -573,13 +1092,18 @@ class CoachService:
             '6. Следуй profileGuidance.volumeGuidance для количества подходов и повторений.\n'
             '7. Выбирай упражнения только из candidateExercises (priority → secondary). '
             '   Не изобретай упражнения которых нет в списке.\n'
+            '8. Если пользователь явно назвал конкретное упражнение в пожеланиях — оно ОБЯЗАНО попасть в тренировку. '
+            '   Единственные исключения: упражнение нагружает мышцу с recoveryStatus="blocked" (< 48ч) '
+            '   или запрещено injuryConstraints. Во всех остальных случаях включи его, '
+            '   даже если оно в списке "avoid" или отсутствует в candidateExercises — найди ближайшее совпадение по имени в каталоге.\n'
             'Для тяжёлых базовых упражнений можешь добавлять warmup_sets, но только там, где они реально нужны. '
             'В warmup_sets нельзя указывать рабочие подходы, только подводящие. '
             'Верни только JSON без markdown и без пояснений вне JSON.'
         )
         notes_part = (
-            f' Пожелания пользователя к тренировке: «{user_notes}». '
-            'Учти их, если они не противоречат алгоритму восстановления и нагрузки.'
+            f' ПОЖЕЛАНИЯ ПОЛЬЗОВАТЕЛЯ (правило 8): «{user_notes}». '
+            'Если названо конкретное упражнение — включи его в тренировку обязательно '
+            '(исключение: blocked-мышца или травма). Остальные пожелания учти в меру возможного.'
             if user_notes and user_notes.strip()
             else ''
         )
@@ -607,14 +1131,7 @@ class CoachService:
             'notes можно оставить пустым.'
         )
         # candidateExercises в plannerSummary уже содержит отфильтрованный список; полный каталог в contextSummary избыточен
-        context_summary_for_llm = {
-            **context_summary,
-            'trainingSummary': {
-                k: v
-                for k, v in context_summary.get('trainingSummary', {}).items()
-                if k != 'availableExercises'
-            },
-        }
+        context_summary_for_llm = _compact_context_for_llm(context_summary, max_workouts=6)
         planner_prompt = (
             'Ниже структурированный анализ для генерации тренировки. '
             'Сначала определи, какие мышцы и упражнения сейчас уместны, потом собери цельную тренировку.\n'
@@ -643,7 +1160,7 @@ class CoachService:
                 select(BodyEntry)
                 .where(BodyEntry.user_id == user.id)
                 .order_by(BodyEntry.entry_date.desc())
-                .limit(8)
+                .limit(12)
             )
         )
         recent_workouts = list(
@@ -652,14 +1169,36 @@ class CoachService:
                 .where(Workout.user_id == user.id)
                 .options(joinedload(Workout.exercises).joinedload(WorkoutExercise.sets))
                 .order_by(Workout.started_at.desc(), Workout.id.desc())
-                .limit(12)
+                .limit(20)
             ).unique()
         )
         catalog_exercises = list(
             self.db.scalars(
                 select(ExerciseCatalog)
                 .where(ExerciseCatalog.user_id == user.id)
+                .options(selectinload(ExerciseCatalog.secondary_muscle_links))
                 .order_by(ExerciseCatalog.name.asc())
+            )
+        )
+        exercise_records = list(
+            self.db.scalars(
+                select(ProgressExerciseRecord)
+                .where(ProgressExerciseRecord.user_id == user.id)
+                # Свежие рекорды, а не самые тяжёлые: сортировка по 1ПМ всегда
+                # ставила жим лёжа первым, и модель зацикливалась на нём.
+                .order_by(ProgressExerciseRecord.updated_at.desc())
+                .limit(15)
+            )
+        )
+        user_progression = self.db.scalar(
+            select(UserProgression).where(UserProgression.user_id == user.id)
+        )
+        coach_memories = list(
+            self.db.scalars(
+                select(CoachUserMemory)
+                .where(CoachUserMemory.user_id == user.id)
+                .order_by(CoachUserMemory.updated_at.desc())
+                .limit(30)
             )
         )
         muscle_map: dict[int, str] = {ex.id: ex.primary_muscle for ex in catalog_exercises}
@@ -687,24 +1226,19 @@ class CoachService:
             )
         ) or 0
 
-        week_start_expr = func.date_trunc(text("'week'"), Workout.started_at)
-        volume_rows = self.db.execute(
-            select(
-                week_start_expr.label('week_start'),
-                func.sum(ExerciseSet.weight * ExerciseSet.reps).label('volume'),
+        # Тоннаж по неделям за 3 недели — в Python, чтобы не зависеть от
+        # date_trunc (его нет в SQLite при локальной разработке).
+        weekly_volume: dict[date, float] = {}
+        for workout in recent_workouts:
+            if not workout.started_at or (today - workout.started_at.date()).days > 21:
+                continue
+            week_start = workout.started_at.date() - timedelta(days=workout.started_at.weekday())
+            weekly_volume[week_start] = weekly_volume.get(week_start, 0.0) + sum(
+                float(s.weight) * s.reps
+                for e in workout.exercises
+                for s in e.sets
+                if s.weight is not None
             )
-            .join(WorkoutExercise, WorkoutExercise.workout_id == Workout.id)
-            .join(ExerciseSet, ExerciseSet.workout_exercise_id == WorkoutExercise.id)
-            .where(
-                Workout.user_id == user.id,
-                Workout.started_at
-                >= datetime.combine(today - timedelta(days=21), time.min, tzinfo=timezone.utc),
-                ExerciseSet.weight.isnot(None),
-            )
-            .group_by(week_start_expr)
-            .order_by(week_start_expr.desc())
-            .limit(6)
-        ).all()
 
         exercise_workout_weights: dict[str, list[tuple[date, float]]] = {}
         top_exercises_30d: Counter[str] = Counter()
@@ -847,11 +1381,28 @@ class CoachService:
                             if s.reps > 0 and getattr(s, 'set_type', 'work') != 'warmup'
                         )
 
+        workouts_7d = [
+            w for w in recent_workouts
+            if w.started_at and (today - w.started_at.date()).days <= 7
+        ]
+        load_calculator = MuscleLoadCalculator(catalog_exercises)
+        effective_7d = load_calculator.total_loads(workouts_7d, reference=recent_workouts)
+        # Дата последней тренировки мышцы — где она получила хотя бы 1
+        # эффективный подход, включая работу вторичной мышцей (трицепс в жиме).
+        best_e1rm = load_calculator.best_e1rm(recent_workouts)
+        for workout in recent_workouts:
+            if not workout.started_at:
+                continue
+            workout_day = workout.started_at.date().isoformat()
+            for muscle, value in load_calculator.workout_loads(workout, best_e1rm).items():
+                if value >= 1 and workout_day > muscle_last_date.get(muscle, ''):
+                    muscle_last_date[muscle] = workout_day
         muscle_distribution = [
             {
                 'muscle': muscle,
                 'lastTrainedDate': muscle_last_date[muscle],
                 'recentSets7d': muscle_recent_sets_7d[muscle],
+                'effectiveSets7d': round(effective_7d.get(muscle, 0.0), 1),
             }
             for muscle in sorted(
                 muscle_last_date,
@@ -890,6 +1441,66 @@ class CoachService:
                 profile_data['injuries'] = fitness_profile.injuries
             if fitness_profile.days_per_week:
                 profile_data['daysPerWeek'] = fitness_profile.days_per_week
+            if fitness_profile.birth_year:
+                age = today.year - fitness_profile.birth_year
+                profile_data['age'] = age
+                if age >= 40:
+                    profile_data['ageNote'] = 'Возраст 40+ — увеличенное восстановление между тренировками, осторожность с максимальными нагрузками'
+            if fitness_profile.height_cm:
+                profile_data['heightCm'] = fitness_profile.height_cm
+            if fitness_profile.preferred_days:
+                profile_data['preferredDays'] = fitness_profile.preferred_days
+            if fitness_profile.coach_notes and fitness_profile.coach_notes.strip():
+                profile_data['coachNotes'] = fitness_profile.coach_notes.strip()
+            # BMI если есть рост и последний вес
+            if fitness_profile.height_cm and latest_recent_weight and latest_recent_weight.weight_kg:
+                h_m = fitness_profile.height_cm / 100
+                bmi = round(latest_recent_weight.weight_kg / (h_m * h_m), 1)
+                profile_data['bmi'] = bmi
+
+        # Рекорды по упражнениям
+        exercise_records_summary = [
+            {
+                'name': rec.exercise_name,
+                'best1rm': round(rec.best_1rm, 1) if rec.best_1rm else None,
+                'bestWeight': round(rec.best_weight, 1) if rec.best_weight else None,
+                'bestReps': rec.best_reps if rec.best_reps else None,
+            }
+            for rec in exercise_records
+            if rec.best_1rm or rec.best_weight
+        ]
+
+        # Статистика пользователя
+        user_stats: dict = {}
+        if user_progression:
+            user_stats = {
+                'currentStreak': user_progression.current_streak,
+                'bestStreak': user_progression.best_streak,
+                'totalPrCount': user_progression.total_pr_count,
+                'totalXp': user_progression.total_xp,
+            }
+
+        # История веса тела (все записи как тренд)
+        body_weight_history = [
+            {
+                'date': entry.entry_date.isoformat(),
+                'weightKg': entry.weight_kg,
+                'waistCm': entry.waist_cm,
+            }
+            for entry in reversed(body_entries)
+            if entry.weight_kg is not None
+        ]
+
+        # Память коуча о пользователе
+        # Самые уверенные и свежие 15 фактов — остальное не стоит токенов.
+        coach_memory_dict = {
+            mem.key: mem.value
+            for mem in sorted(
+                coach_memories,
+                key=lambda m: (m.confidence or 0, m.updated_at),
+                reverse=True,
+            )[:15]
+        }
 
         return {
             'app': {
@@ -899,6 +1510,7 @@ class CoachService:
             'user': {
                 'displayName': display_name_for_user(user),
                 **({'fitnessProfile': profile_data} if profile_data else {}),
+                **({'stats': user_stats} if user_stats else {}),
             },
             'trainingSummary': {
                 'totalWorkouts': workout_count_total,
@@ -910,7 +1522,7 @@ class CoachService:
                     else None
                 ),
                 'topExercisesRecent': [
-                    {'name': name, 'muscle': muscle_map_by_name.get(name), 'timesInLast12': count}
+                    {'name': name, 'muscle': muscle_map_by_name.get(name), 'timesInLast20': count}
                     for name, count in top_exercises.most_common(5)
                 ],
                 'availableExercises': [
@@ -919,6 +1531,7 @@ class CoachService:
                 ],
                 'muscleDistribution': muscle_distribution,
             },
+            'exerciseRecords': exercise_records_summary or None,
             'bodyMetrics': None
             if latest_body is None
             else {
@@ -930,15 +1543,14 @@ class CoachService:
                 'notes': _trim_text(latest_body.notes, 160),
                 'weightTrendRecentKg': weight_trend,
             },
+            'bodyWeightHistory': body_weight_history or None,
             'recentWeeklyVolume': [
-                {
-                    'weekStart': row.week_start.date().isoformat(),
-                    'volume': round(float(row.volume or 0), 1),
-                }
-                for row in volume_rows
+                {'weekStart': week.isoformat(), 'volume': round(volume, 1)}
+                for week, volume in sorted(weekly_volume.items(), reverse=True)
             ],
             'recentWorkouts': workouts_summary,
             'progressionTrends': progression_trends,
+            **({'coachMemory': coach_memory_dict} if coach_memory_dict else {}),
         }
 
     def _build_workout_planner_summary(
@@ -950,6 +1562,20 @@ class CoachService:
         wellness_entries: list[dict] | None = None,
     ) -> dict:
         recent_workouts = (context_summary.get('recentWorkouts') or [])[:12]
+
+        last_workout_context: dict | None = None
+        if recent_workouts:
+            last = recent_workouts[0]
+            last_exercises = [ex.get('name') for ex in (last.get('exercises') or []) if ex.get('name')]
+            last_muscles = list({ex.get('muscle') for ex in (last.get('exercises') or []) if ex.get('muscle')})
+            last_workout_context = {
+                'date': last.get('date'),
+                'name': last.get('name'),
+                'exercises': last_exercises,
+                'muscles': last_muscles,
+                'note': 'Избегай повторения тех же упражнений. Смени акценты и паттерны движений.',
+            }
+
         available_exercises = (
             context_summary.get('trainingSummary', {}).get('availableExercises') or []
         )
@@ -1140,6 +1766,8 @@ class CoachService:
             )
         )
 
+        trends_lookup = {t['name']: t for t in (context_summary.get('progressionTrends') or [])}
+
         progression_anchors = []
         for entry in top_exercises_recent[:5]:
             name = str(entry.get('name') or '').strip()
@@ -1148,12 +1776,27 @@ class CoachService:
             history = exercise_examples.get(name, [])
             if not history:
                 continue
+            trend_info = trends_lookup.get(name)
+            trend = trend_info.get('trend') if trend_info else None
+            last_weight = _parse_max_work_weight(history[0].get('sets') or '')
+            suggested_target: str | None = None
+            if last_weight is not None:
+                if trend == 'growing':
+                    suggested_target = f'{last_weight + 2.5:g}кг (прогресс — добавь вес)'
+                elif trend == 'stalled':
+                    suggested_target = f'{last_weight:g}кг (застой — попробуй больше повторений или техника)'
+                elif trend == 'declining':
+                    suggested_target = f'{last_weight:g}кг (откат — приоритет качество движения)'
+                else:
+                    suggested_target = f'{last_weight:g}кг'
             progression_anchors.append(
                 {
                     'exercise': name,
                     'muscle': entry.get('muscle'),
                     'lastPerformance': history[0].get('sets'),
                     'lastDate': history[0].get('date'),
+                    'trend': trend,
+                    'suggestedTarget': suggested_target,
                 }
             )
 
@@ -1227,6 +1870,7 @@ class CoachService:
             'profileGuidance': profile_guidance or None,
             'injuryConstraints': injuries.strip() if injuries and injuries.strip() else None,
             'wellnessSignals': wellness_signals if wellness_signals.get('today') else None,
+            'lastWorkoutContext': last_workout_context,
         }
 
     def _trim_history(self, *, user_id: int) -> None:
@@ -1246,6 +1890,89 @@ class CoachService:
                 CoachChatMessage.id.not_in(ids_to_keep),
             )
         )
+
+
+def _parse_json_object(content: str) -> dict | None:
+    """JSON-объект из ответа LLM, даже если он обёрнут в markdown или текст."""
+    clean = content.strip()
+    if clean.startswith('```'):
+        clean = re.sub(r'^```[a-z]*\n?', '', clean)
+        clean = re.sub(r'\n?```$', '', clean.strip())
+    try:
+        parsed = json.loads(clean)
+    except json.JSONDecodeError:
+        match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if not match:
+            return None
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+_PERSONAL_FACT_MARKERS = re.compile(
+    r'\b(я|мне|меня|мной|мой|моя|моё|мое|мои|моих|моим|у\s+меня|хочу|люблю|не\s+люблю|'
+    r'болит|болела?|травм\w*|операц\w*|работаю|сплю|цель|занимаюсь|могу|не\s+могу|'
+    r'зал\w*|дома|гантел\w*|турник\w*)\b',
+    re.IGNORECASE,
+)
+
+
+def _may_contain_personal_fact(user_text: str) -> bool:
+    """Дешёвый фильтр перед LLM-извлечением памяти."""
+    text_value = (user_text or '').strip()
+    if len(text_value) < 25:
+        return False
+    return bool(_PERSONAL_FACT_MARKERS.search(text_value))
+
+
+def _compact_context_for_llm(context: dict, *, max_workouts: int) -> dict:
+    """Ужимает контекст для LLM: тренировки — строками, без полного каталога.
+
+    Полная сводка ~23 тыс. символов; компактная — в 2–3 раза меньше при той
+    же информации для ответа.
+    """
+    compact = {k: v for k, v in context.items() if k not in ('recentWorkouts', 'coachMemory')}
+    training = {
+        k: v for k, v in (context.get('trainingSummary') or {}).items()
+        if k != 'availableExercises'
+    }
+    # recentSets7d считает только основную мышцу упражнения и противоречит
+    # effectiveSets7d — модели оставляем одну, согласованную с приложением цифру.
+    if training.get('muscleDistribution'):
+        training['muscleDistribution'] = [
+            {k: v for k, v in item.items() if k != 'recentSets7d'}
+            for item in training['muscleDistribution']
+        ]
+    compact['trainingSummary'] = training
+
+    lines = []
+    for workout in (context.get('recentWorkouts') or [])[:max_workouts]:
+        header = f"{workout.get('date')} «{workout.get('name')}»"
+        if workout.get('durationMin'):
+            header += f" {workout['durationMin']}мин"
+        exercises = '; '.join(
+            f"{ex.get('name')}"
+            + (f"[{ex['muscle']}]" if ex.get('muscle') else '')
+            + f": {ex.get('sets')}"
+            for ex in workout.get('exercises') or []
+        )
+        line = f'{header} — {exercises}'
+        if workout.get('notes'):
+            line += f" (заметка: {workout['notes']})"
+        lines.append(line)
+    if lines:
+        compact['recentWorkouts'] = lines
+
+    if context.get('exerciseRecords'):
+        compact['exerciseRecords'] = [
+            f"{r['name']}: 1ПМ {r.get('best1rm')} кг, макс {r.get('bestWeight')} кг"
+            for r in context['exerciseRecords'][:15]
+        ]
+    if context.get('coachMemory'):
+        compact['coachMemory'] = [f'{k}: {v}' for k, v in context['coachMemory'].items()]
+    return compact
 
 
 def _trim_text(value: str | None, limit: int) -> str | None:
@@ -1371,6 +2098,35 @@ def _build_wellness_signals(wellness_entries: list[dict] | None, today: date) ->
     if s >= 4 and e >= 4 and m >= 4 and st <= 2:
         intensity_modifier = 'boost'
 
+    # Тренд за последние 7 дней — выявляем накопленную усталость
+    week_entries = sorted(wellness_entries, key=lambda x: x.get('date', ''), reverse=True)[:7]
+    week_trend: dict | None = None
+    if len(week_entries) >= 2:
+        avg_sleep = sum(x.get('sleep', 3) for x in week_entries) / len(week_entries)
+        avg_energy = sum(x.get('energy', 3) for x in week_entries) / len(week_entries)
+        avg_stress = sum(x.get('stress', 3) for x in week_entries) / len(week_entries)
+        week_trend = {
+            'days': len(week_entries),
+            'avgSleep': round(avg_sleep, 1),
+            'avgEnergy': round(avg_energy, 1),
+            'avgStress': round(avg_stress, 1),
+        }
+        # Накопленная усталость важнее одного дня — ставим флаги в начало списка
+        if avg_sleep < 2.5:
+            flags.insert(0, f'Накопленный дефицит сна за {len(week_entries)} дн. (средний {round(avg_sleep, 1)}/5) — значительно снизь объём')
+            intensity_modifier = 'reduce'
+        elif avg_sleep < 3.0 and s <= 3:
+            flags.insert(0, f'Хронически нестабильный сон за {len(week_entries)} дн. (средний {round(avg_sleep, 1)}/5) — умеренный объём')
+            if intensity_modifier == 'normal':
+                intensity_modifier = 'reduce'
+        if avg_energy < 2.5:
+            flags.insert(0, f'Хронически низкая энергия за {len(week_entries)} дн. (средний {round(avg_energy, 1)}/5) — восстановительный режим')
+            intensity_modifier = 'reduce'
+        if avg_stress > 3.5:
+            flags.insert(0, f'Повышенный стресс за {len(week_entries)} дн. (средний {round(avg_stress, 1)}/5) — избегай работы до отказа')
+            if intensity_modifier == 'normal':
+                intensity_modifier = 'reduce'
+
     return {
         'today': {
             'sleep': s,
@@ -1379,9 +2135,26 @@ def _build_wellness_signals(wellness_entries: list[dict] | None, today: date) ->
             'mood': m,
             'comment': today_entry.get('comment'),
         },
+        'weekTrend': week_trend,
         'intensityModifier': intensity_modifier,
         'fatigueFlags': flags,
     }
+
+
+def _parse_max_work_weight(sets_text: str) -> float | None:
+    """Парсит максимальный рабочий вес из компактного формата сетов ('80kg×6r / WU×50kg×10r')."""
+    if not sets_text:
+        return None
+    max_w: float | None = None
+    for chunk in sets_text.split(' / '):
+        if chunk.lstrip().startswith('WU'):
+            continue
+        m = re.search(r'([\d.]+)kg', chunk)
+        if m:
+            w = float(m.group(1))
+            if max_w is None or w > max_w:
+                max_w = w
+    return max_w
 
 
 def _guess_split_from_workouts(recent_workouts: list[dict]) -> str:

@@ -44,6 +44,11 @@ _SICK_LEAVE_REASONS = {
 
 _XP_REBALANCE_EFFECTIVE_AT = datetime(2026, 3, 20, 0, 0, 0, tzinfo=timezone.utc)
 
+# С этой даты первое выполнение упражнения — базовая точка, а не рекорд.
+# Раньше новое упражнение сразу давало «рекорд веса» и «рекорд объёма» с XP.
+# Старые тренировки не пересчитываются, чтобы не отнимать набранный XP.
+_PR_BASELINE_EFFECTIVE_AT = datetime(2026, 10, 26, 0, 0, 0, tzinfo=timezone.utc)
+
 _LEGACY_XP = {
     'workout_completed': 20,
     'workout_volume_bonus_10': 5,
@@ -487,6 +492,9 @@ class _ProgressionCalculator:
                 )
                 self._achievement_once(code='first_workout', achieved_at=performed_at)
 
+            if self.total_completed_workouts == 100:
+                self._achievement_once(code='hundred_workouts', achieved_at=performed_at)
+
             if self.total_completed_workouts in (10, 25, 50):
                 self._reward_once(
                     event_key=f'milestone_workouts:{self.total_completed_workouts}',
@@ -537,6 +545,11 @@ class _ProgressionCalculator:
             self._achievement_once(code='first_pr', achieved_at=self.record_events[0].achieved_at)
         if len(self.record_events) >= 5:
             self._achievement_once(code='five_prs', achieved_at=self.record_events[4].achieved_at)
+        for count, code in ((10, 'ten_prs'), (25, 'twenty_five_prs'), (50, 'fifty_prs')):
+            if len(self.record_events) >= count:
+                self._achievement_once(
+                    code=code, achieved_at=self.record_events[count - 1].achieved_at,
+                )
 
         weekly = self._build_weekly_summaries(valid_dates, today)
         self._award_weekly_progress(weekly, today)
@@ -544,6 +557,7 @@ class _ProgressionCalculator:
         self._award_monthly_progress(monthly, today)
 
         current_streak, best_streak = self._calculate_streaks(weekly, today)
+        self._award_long_term_achievements(weekly, today)
         total_xp = sum(item.xp_awarded for item in self.reward_events.values())
         level = get_level_by_xp(total_xp)
         level_start_xp = get_level_start_xp(level)
@@ -580,6 +594,10 @@ class _ProgressionCalculator:
                 'idealWeeksCount': sum(1 for item in weekly if item['isIdeal']),
                 'idealMonthsCount': sum(1 for item in monthly if item['isIdeal']),
             },
+            'achievementCatalog': self._build_achievement_catalog(
+                best_streak=best_streak,
+                ideal_weeks=sum(1 for item in weekly if item['isIdeal']),
+            ),
             'currentWeek': current_week,
             'currentMonth': current_month,
             'recentAchievements': [
@@ -631,6 +649,10 @@ class _ProgressionCalculator:
 
             exercise_key = _exercise_key(exercise)
             previous = self.exercise_records.get(exercise_key)
+            aware_performed_at = (
+                performed_at if performed_at.tzinfo else performed_at.replace(tzinfo=timezone.utc)
+            )
+            is_baseline = previous is None and aware_performed_at >= _PR_BASELINE_EFFECTIVE_AT
             previous_weight = previous.best_weight if previous else 0
             previous_1rm = previous.best_1rm if previous else 0
             previous_volume = previous.best_volume if previous else 0
@@ -650,7 +672,7 @@ class _ProgressionCalculator:
             ]
             reps_at_record_weight = max((s.reps for s in sets_at_record_weight), default=0)
 
-            if best_weight > previous_weight:
+            if best_weight > previous_weight and not is_baseline:
                 count += 1
                 self._reward_once(
                     event_key=f'pr_weight:{workout.id}:{exercise_key}',
@@ -670,7 +692,7 @@ class _ProgressionCalculator:
                     )
                 )
 
-            if best_volume > previous_volume:
+            if best_volume > previous_volume and not is_baseline:
                 count += 1
                 self._reward_once(
                     event_key=f'pr_volume:{workout.id}:{exercise_key}',
@@ -691,7 +713,7 @@ class _ProgressionCalculator:
                 )
 
             # pr_reps: отслеживаем рекорд повторений с рекордным весом (без XP и ленты)
-            if reps_at_record_weight > previous_reps:
+            if reps_at_record_weight > previous_reps and not is_baseline:
                 self.record_events.append(
                     RecordEventData(
                         workout_id=workout.id,
@@ -860,6 +882,63 @@ class _ProgressionCalculator:
             break
         return current, max(best, current)
 
+    def _award_long_term_achievements(self, weekly: list[dict], today: date) -> None:
+        """Достижения за серии недель и накопленные идеальные недели."""
+        current_week_start = start_of_week(today)
+        running = 0
+        ideal = 0
+        for item in weekly:
+            week_start = date.fromisoformat(item['startDate'])
+            achieved_at = (
+                datetime.now(timezone.utc)
+                if week_start == current_week_start
+                else _end_of_day(date.fromisoformat(item['endDate']))
+            )
+            if item['streakEligible']:
+                running += 1
+            elif not item['isFrozen'] and week_start != current_week_start:
+                running = 0
+            for weeks, code in _STREAK_ACHIEVEMENTS:
+                if running >= weeks:
+                    self._achievement_once(code=code, achieved_at=achieved_at)
+            if item['isIdeal']:
+                ideal += 1
+                if ideal >= 10:
+                    self._achievement_once(code='ten_ideal_weeks', achieved_at=achieved_at)
+
+    def _build_achievement_catalog(self, *, best_streak: int, ideal_weeks: int) -> list[dict]:
+        """Все достижения — полученные и будущие — с прогрессом к цели."""
+        progress_by_code = {
+            'first_workout': (self.total_completed_workouts, 1),
+            'ten_workouts': (self.total_completed_workouts, 10),
+            'twenty_five_workouts': (self.total_completed_workouts, 25),
+            'fifty_workouts': (self.total_completed_workouts, 50),
+            'hundred_workouts': (self.total_completed_workouts, 100),
+            'first_pr': (len(self.record_events), 1),
+            'five_prs': (len(self.record_events), 5),
+            'ten_prs': (len(self.record_events), 10),
+            'twenty_five_prs': (len(self.record_events), 25),
+            'fifty_prs': (len(self.record_events), 50),
+            'streak_4_weeks': (best_streak, 4),
+            'streak_8_weeks': (best_streak, 8),
+            'streak_12_weeks': (best_streak, 12),
+            'ten_ideal_weeks': (ideal_weeks, 10),
+        }
+        catalog = []
+        for code in _ACHIEVEMENT_ORDER:
+            achieved = self.achievements.get(code)
+            current, target = progress_by_code.get(code, (1 if achieved else 0, 1))
+            catalog.append({
+                'code': code,
+                'title': _achievement_title(code),
+                'description': _ACHIEVEMENT_DESCRIPTIONS.get(code, ''),
+                'unlocked': achieved is not None,
+                'achievedAt': achieved.achieved_at.isoformat() if achieved else None,
+                'progress': min(current, target),
+                'target': target,
+            })
+        return catalog
+
     def _reward_once(
         self,
         *,
@@ -869,6 +948,8 @@ class _ProgressionCalculator:
         created_at: datetime,
         metadata: dict | None = None,
     ) -> None:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         self.reward_events.setdefault(
             event_key,
             RewardEventData(
@@ -881,6 +962,9 @@ class _ProgressionCalculator:
         )
 
     def _xp_for(self, code: str, achieved_at: datetime) -> int:
+        if achieved_at.tzinfo is None:
+            # SQLite (локальная разработка) отдаёт даты без часового пояса.
+            achieved_at = achieved_at.replace(tzinfo=timezone.utc)
         table = _REBALANCED_XP if achieved_at >= _XP_REBALANCE_EFFECTIVE_AT else _LEGACY_XP
         return table.get(code, 0)
 
@@ -894,6 +978,8 @@ class _ProgressionCalculator:
         return 0
 
     def _achievement_once(self, *, code: str, achieved_at: datetime, metadata: dict | None = None) -> None:
+        if achieved_at.tzinfo is None:
+            achieved_at = achieved_at.replace(tzinfo=timezone.utc)
         self.achievements.setdefault(
             code,
             AchievementData(code=code, achieved_at=achieved_at, metadata=metadata),
@@ -1064,9 +1150,66 @@ def _serialize_sick_leave(item: SickLeave | None) -> dict | None:
     }
 
 
+_STREAK_ACHIEVEMENTS = ((4, 'streak_4_weeks'), (8, 'streak_8_weeks'), (12, 'streak_12_weeks'))
+
+_ACHIEVEMENT_ORDER = (
+    'first_workout',
+    'ten_workouts',
+    'twenty_five_workouts',
+    'fifty_workouts',
+    'hundred_workouts',
+    'good_week',
+    'ideal_week',
+    'streak_4_weeks',
+    'streak_8_weeks',
+    'streak_12_weeks',
+    'ten_ideal_weeks',
+    'first_perfect_month',
+    'first_pr',
+    'five_prs',
+    'ten_prs',
+    'twenty_five_prs',
+    'fifty_prs',
+    'high_volume_session',
+    'comeback_after_break',
+    'return_after_sick_leave',
+)
+
+_ACHIEVEMENT_DESCRIPTIONS = {
+    'first_workout': 'Завершите первую тренировку',
+    'ten_workouts': 'Завершите 10 тренировок',
+    'twenty_five_workouts': 'Завершите 25 тренировок',
+    'fifty_workouts': 'Завершите 50 тренировок',
+    'hundred_workouts': 'Завершите 100 тренировок',
+    'good_week': '2 тренировки за неделю',
+    'ideal_week': '3 тренировки за неделю',
+    'streak_4_weeks': '4 недели подряд по 2+ тренировки',
+    'streak_8_weeks': '8 недель подряд по 2+ тренировки',
+    'streak_12_weeks': '12 недель подряд по 2+ тренировки',
+    'ten_ideal_weeks': '10 недель с 3+ тренировками',
+    'first_perfect_month': 'Все недели месяца — идеальные',
+    'first_pr': 'Побейте первый личный рекорд',
+    'five_prs': '5 личных рекордов',
+    'ten_prs': '10 личных рекордов',
+    'twenty_five_prs': '25 личных рекордов',
+    'fifty_prs': '50 личных рекордов',
+    'high_volume_session': '20+ рабочих подходов за тренировку',
+    'comeback_after_break': 'Вернитесь после паузы в 10+ дней',
+    'return_after_sick_leave': 'Первая тренировка после больничного',
+}
+
+
 def _achievement_title(code: str) -> str:
     return {
         'first_workout': 'Первая тренировка',
+        'hundred_workouts': '100 тренировок',
+        'ten_prs': '10 рекордов',
+        'twenty_five_prs': '25 рекордов',
+        'fifty_prs': '50 рекордов',
+        'streak_4_weeks': 'Серия 4 недели',
+        'streak_8_weeks': 'Серия 8 недель',
+        'streak_12_weeks': 'Серия 12 недель',
+        'ten_ideal_weeks': '10 идеальных недель',
         'good_week': 'Хорошая неделя',
         'ideal_week': 'Идеальная неделя',
         'first_perfect_month': 'Первый идеальный месяц',

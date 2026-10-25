@@ -10,10 +10,15 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../progression/application/progression_controller.dart';
+import '../../heatmap/data/heatmap_reference_workouts.dart';
+import 'rest_timer_button.dart';
+import 'set_quick_entry.dart';
+import 'workout_completion_sheet.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
 import '../application/workout_share_service.dart';
 import '../domain/workout_metrics.dart';
+import '../../../core/utils/search.dart';
 
 class WorkoutFormScreen extends StatefulWidget {
   const WorkoutFormScreen({
@@ -41,12 +46,15 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   late final TextEditingController _workoutNoteController;
   late final PageCloseGuard _pageCloseGuard;
   late final ScrollController _scrollController;
+  final RestTimerController _restTimer = RestTimerController();
   late DateTime _selectedDate;
   late DateTime _startedAt;
   DateTime? _finishedAt;
 
   final List<_ExerciseDraft> _exercises = [];
   List<Map<String, dynamic>> _catalog = const [];
+  late final List<Map<String, dynamic>> _heatmapReferenceWorkouts =
+      cachedHeatmapReferenceWorkouts();
   List<Map<String, dynamic>> _workoutHistory = const [];
   final Map<String, _ExerciseLastSetState> _lastSetByExerciseName = {};
 
@@ -148,6 +156,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _draftSaveTimer?.cancel();
     _pageCloseGuard.dispose();
     _scrollController.dispose();
+    _restTimer.dispose();
     _nameController.dispose();
     _workoutNoteController.dispose();
     for (final exercise in _exercises) {
@@ -559,6 +568,77 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _scrollToKey(draft.containerKey);
   }
 
+  /// Подход из быстрого ввода: заполняет первую пустую строку таблицы или
+  /// добавляет новую, затем запускает отдых.
+  void _submitQuickSet(
+    int exerciseIndex,
+    double weight,
+    int reps,
+    double? rpe,
+  ) {
+    final exercise = _exercises[exerciseIndex];
+    setState(() {
+      _SetDraft? target;
+      for (final set in exercise.sets) {
+        if (set.weightController.text.trim().isEmpty) {
+          target = set;
+          break;
+        }
+      }
+      if (target == null) {
+        target = _SetDraft.empty();
+        exercise.sets.add(target);
+      }
+      target.weightController.text = weight == weight.roundToDouble()
+          ? weight.toInt().toString()
+          : weight.toString();
+      target.repsController.text = '$reps';
+      target.rpe = rpe;
+    });
+    _handleDraftChanged();
+    _restTimer.start();
+  }
+
+  ({int setNumber, double weight, int reps}) _quickEntrySeed(
+    _ExerciseDraft exercise,
+    _WorkingSetSummary? lastSession,
+  ) {
+    var filled = 0;
+    _SetDraft? lastFilled;
+    for (final set in exercise.sets) {
+      if (set.weightController.text.trim().isNotEmpty) {
+        filled++;
+        lastFilled = set;
+      }
+    }
+    if (lastFilled != null) {
+      return (
+        setNumber: filled + 1,
+        weight: _parseWeight(lastFilled.weightController.text) ?? 0,
+        reps: int.tryParse(lastFilled.repsController.text) ?? 8,
+      );
+    }
+    return (
+      setNumber: 1,
+      weight: lastSession?.weight ?? 0,
+      reps: lastSession?.reps ?? 8,
+    );
+  }
+
+  /// « · рекорд 115 кг», если у упражнения есть рекорд в прогрессии.
+  String _recordLabel(String exerciseName) {
+    final key = _normalizeExerciseLookupName(exerciseName);
+    final records =
+        ProgressionController.instance.profile?.allExerciseRecords ?? const [];
+    for (final record in records) {
+      if (_normalizeExerciseLookupName(record.exerciseName) == key &&
+          record.bestWeight > 0) {
+        return ' · рекорд ${formatWeight(record.bestWeight)}\u00A0кг';
+      }
+    }
+    return '';
+  }
+
   void _scrollToKey(
     GlobalKey key, {
     double alignment = 0.08,
@@ -814,6 +894,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
       _saveStatus = _SaveStatus.saving;
     });
 
+    final progressionBefore = ProgressionController.instance.profile;
     try {
       final workoutNote = _workoutNoteController.text.trim();
       final result = _isEditing
@@ -854,13 +935,27 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
         _hasUnsavedChanges = false;
         _saveStatus = _SaveStatus.saved;
       });
-      unawaited(ProgressionController.instance.refresh());
-
       if (finishWorkout) {
+        // Сбрасываем кэш AI-инсайтов — данные изменились после тренировки
+        unawaited(LocalCache.remove(CacheKeys.progressInsightsCache));
         unawaited(HapticFeedback.heavyImpact());
+        // Итог тренировки: XP, рекорды, прогресс недели. Ждём пересчёт
+        // прогрессии недолго — без сети покажем только статистику.
+        await ProgressionController.instance
+            .refresh()
+            .timeout(const Duration(seconds: 8), onTimeout: () {});
+        if (!mounted) return;
+        await showWorkoutCompletionSheet(
+          context,
+          workout: result,
+          before: progressionBefore,
+          after: ProgressionController.instance.profile,
+        );
+        if (!mounted) return;
         Navigator.of(context).pop(true);
         return;
       }
+      unawaited(ProgressionController.instance.refresh());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Тренировка сохранена.')),
       );
@@ -975,7 +1070,8 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   }
 
   Future<void> _handleFinishPressed() async {
-    final result = await showDialog<({DateTime startedAt, DateTime finishedAt})>(
+    final result =
+        await showDialog<({DateTime startedAt, DateTime finishedAt})>(
       context: context,
       builder: (context) => _FinishWorkoutDialog(
         initialStartedAt: _startedAt,
@@ -1040,6 +1136,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               'reps': int.tryParse(set.repsController.text.trim()) ?? 0,
               'weight': _parseWeight(set.weightController.text),
               'set_type': set.setType,
+              'rpe': set.rpe,
             };
           }),
         };
@@ -1050,12 +1147,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final calculator = const MuscleLoadCalculator();
-    final rawLoads = calculator.calculateForWorkout(
+    final heatmapLoads = const MuscleLoadCalculator().calculateForWorkout(
       workout: _draftWorkoutForHeatmap(),
       exerciseCatalog: _catalog,
+      referenceWorkouts: _heatmapReferenceWorkouts,
     );
-    final normalizedLoads = calculator.normalizer.normalize(rawLoads);
 
     return PopScope<bool>(
       canPop: false,
@@ -1074,6 +1170,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           title: Text(_isEditing ? 'Тренировка' : 'Новая тренировка'),
           backgroundColor: Colors.transparent,
           actions: [
+            if (!_isFinished) RestTimerButton(controller: _restTimer),
             if (_isEditing && _isFinished)
               IconButton(
                 icon: const Icon(Icons.ios_share_rounded),
@@ -1169,401 +1266,337 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           ),
         ),
         body: AppBackdrop(
-          child: ListView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+          child: Column(
             children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(999),
-                    onTap: _pickDate,
-                    child: StatusBadge(
-                      label: formatShortDate(_selectedDate),
-                      color: scheme.onSurfaceVariant,
-                      icon: Icons.calendar_today_outlined,
-                    ),
-                  ),
-                  StatusBadge(
-                    label: _isFinished ? 'Завершена' : 'В работе',
-                    color: _isFinished ? scheme.primary : scheme.secondary,
-                    icon: _isFinished
-                        ? Icons.check_circle_outline
-                        : Icons.fitness_center,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              GestureDetector(
-                onTap: _openWorkoutNoteDialog,
-                child: _workoutNoteController.text.isNotEmpty
-                    ? Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: scheme.secondary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: scheme.secondary.withValues(alpha: 0.25),
+              RestTimerBar(controller: _restTimer),
+              Expanded(
+                child: ListView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                  children: [
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        InkWell(
+                          borderRadius: BorderRadius.circular(999),
+                          onTap: _pickDate,
+                          child: StatusBadge(
+                            label: formatShortDate(_selectedDate),
+                            color: scheme.onSurfaceVariant,
+                            icon: Icons.calendar_today_outlined,
                           ),
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 1),
-                              child: Icon(
-                                Icons.sticky_note_2_outlined,
-                                size: 14,
-                                color: scheme.secondary,
+                        StatusBadge(
+                          label: _isFinished ? 'Завершена' : 'В работе',
+                          color:
+                              _isFinished ? scheme.primary : scheme.secondary,
+                          icon: _isFinished
+                              ? Icons.check_circle_outline
+                              : Icons.fitness_center,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: _openWorkoutNoteDialog,
+                      child: _workoutNoteController.text.isNotEmpty
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: scheme.secondary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color:
+                                      scheme.secondary.withValues(alpha: 0.25),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _workoutNoteController.text,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                      color: scheme.onSurfaceVariant,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 1),
+                                    child: Icon(
+                                      Icons.sticky_note_2_outlined,
+                                      size: 14,
+                                      color: scheme.secondary,
                                     ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.edit_outlined,
-                              size: 13,
-                              color: scheme.onSurfaceVariant
-                                  .withValues(alpha: 0.45),
-                            ),
-                          ],
-                        ),
-                      )
-                    : Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest
-                              .withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: scheme.outlineVariant.withValues(alpha: 0.3),
-                            style: BorderStyle.solid,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.sticky_note_2_outlined,
-                              size: 14,
-                              color: scheme.onSurfaceVariant
-                                  .withValues(alpha: 0.45),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Добавить заметку к тренировке',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.6),
                                   ),
-                            ),
-                          ],
-                        ),
-                      ),
-              ),
-              const SizedBox(height: 12),
-              if (_catalogError != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: DashboardCard(
-                    child: Text(_catalogError!),
-                  ),
-                ),
-              ...List.generate(_exercises.length, (exerciseIndex) {
-                final exercise = _exercises[exerciseIndex];
-                final accent = _exerciseAccentColor(scheme, exerciseIndex);
-                final lastSetState =
-                    _lastSetByExerciseName[_normalizeExerciseLookupName(
-                  exercise.nameController.text,
-                )];
-                final canDelete = _exercises.length > 1;
-                final isEmpty = exercise.nameController.text.trim().isEmpty;
-                return Padding(
-                  key: exercise.containerKey,
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Dismissible(
-                    key: ObjectKey(exercise),
-                    direction: canDelete && !isEmpty
-                        ? DismissDirection.endToStart
-                        : DismissDirection.none,
-                    confirmDismiss: (_) => showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Удалить упражнение?'),
-                        content: const Text(
-                          'Упражнение и все подходы будут удалены безвозвратно.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
-                            child: const Text('Отмена'),
-                          ),
-                          FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Theme.of(ctx).colorScheme.error,
-                            ),
-                            onPressed: () => Navigator.of(ctx).pop(true),
-                            child: const Text('Удалить'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    onDismissed: (_) => _removeExercise(exerciseIndex),
-                    background: Container(
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      decoration: BoxDecoration(
-                        color: scheme.errorContainer,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Удалить',
-                            style: TextStyle(
-                              color: scheme.onErrorContainer,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(Icons.delete_outline,
-                              color: scheme.onErrorContainer),
-                        ],
-                      ),
-                    ),
-                    child: DashboardCard(
-                      leftAccentColor: accent,
-                      onTap: exercise.isCollapsed &&
-                              exercise.nameController.text.trim().isNotEmpty
-                          ? () =>
-                              setState(() => exercise.isCollapsed = false)
-                          : null,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 38,
-                                height: 38,
-                                decoration: BoxDecoration(
-                                  color: accent.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '${exerciseIndex + 1}',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(
-                                        color: accent,
-                                        fontWeight: FontWeight.w900,
-                                      ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _workoutNoteController.text,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    size: 13,
+                                    color: scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.45),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: scheme.outlineVariant
+                                      .withValues(alpha: 0.3),
+                                  style: BorderStyle.solid,
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(14),
-                                  onTap: exercise.isCollapsed
-                                      ? () => setState(
-                                            () => exercise.isCollapsed = false,
-                                          )
-                                      : () => _pickExercise(exerciseIndex),
-                                  child: exercise.nameController.text
-                                          .trim()
-                                          .isEmpty
-                                      ? Container(
-                                          margin: const EdgeInsets.symmetric(
-                                              vertical: 2),
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 12, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color:
-                                                accent.withValues(alpha: 0.08),
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                            border: Border.all(
-                                              color: accent.withValues(
-                                                  alpha: 0.30),
-                                              style: BorderStyle.solid,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.sticky_note_2_outlined,
+                                    size: 14,
+                                    color: scheme.onSurfaceVariant
+                                        .withValues(alpha: 0.45),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Добавить заметку к тренировке',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant
+                                              .withValues(alpha: 0.6),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_catalogError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: DashboardCard(
+                          child: Text(_catalogError!),
+                        ),
+                      ),
+                    ...List.generate(_exercises.length, (exerciseIndex) {
+                      final exercise = _exercises[exerciseIndex];
+                      final accent =
+                          _exerciseAccentColor(scheme, exerciseIndex);
+                      final lastSetState =
+                          _lastSetByExerciseName[_normalizeExerciseLookupName(
+                        exercise.nameController.text,
+                      )];
+                      final canDelete = _exercises.length > 1;
+                      final isEmpty =
+                          exercise.nameController.text.trim().isEmpty;
+                      return Padding(
+                        key: exercise.containerKey,
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Dismissible(
+                          key: ObjectKey(exercise),
+                          direction: canDelete && !isEmpty
+                              ? DismissDirection.endToStart
+                              : DismissDirection.none,
+                          confirmDismiss: (_) => showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Удалить упражнение?'),
+                              content: const Text(
+                                'Упражнение и все подходы будут удалены безвозвратно.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(false),
+                                  child: const Text('Отмена'),
+                                ),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor:
+                                        Theme.of(ctx).colorScheme.error,
+                                  ),
+                                  onPressed: () => Navigator.of(ctx).pop(true),
+                                  child: const Text('Удалить'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          onDismissed: (_) => _removeExercise(exerciseIndex),
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(
+                              color: scheme.errorContainer,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Удалить',
+                                  style: TextStyle(
+                                    color: scheme.onErrorContainer,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(Icons.delete_outline,
+                                    color: scheme.onErrorContainer),
+                              ],
+                            ),
+                          ),
+                          child: DashboardCard(
+                            leftAccentColor: accent,
+                            onTap: exercise.isCollapsed &&
+                                    exercise.nameController.text
+                                        .trim()
+                                        .isNotEmpty
+                                ? () =>
+                                    setState(() => exercise.isCollapsed = false)
+                                : null,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 38,
+                                      height: 38,
+                                      decoration: BoxDecoration(
+                                        color: accent.withValues(alpha: 0.14),
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        '${exerciseIndex + 1}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(
+                                              color: accent,
+                                              fontWeight: FontWeight.w900,
                                             ),
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.add_circle_outline,
-                                                  size: 16, color: accent),
-                                              const SizedBox(width: 8),
-                                              Flexible(
-                                                child: Text(
-                                                  'Выберите упражнение',
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .titleSmall
-                                                      ?.copyWith(
-                                                        color: accent,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                      ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(14),
+                                        onTap: exercise.isCollapsed
+                                            ? () => setState(
+                                                  () => exercise.isCollapsed =
+                                                      false,
+                                                )
+                                            : () =>
+                                                _pickExercise(exerciseIndex),
+                                        child: exercise.nameController.text
+                                                .trim()
+                                                .isEmpty
+                                            ? Container(
+                                                margin:
+                                                    const EdgeInsets.symmetric(
+                                                        vertical: 2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 10),
+                                                decoration: BoxDecoration(
+                                                  color: accent.withValues(
+                                                      alpha: 0.08),
+                                                  borderRadius:
+                                                      BorderRadius.circular(14),
+                                                  border: Border.all(
+                                                    color: accent.withValues(
+                                                        alpha: 0.30),
+                                                    style: BorderStyle.solid,
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                      : exercise.isCollapsed
-                                          ? Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 6),
-                                              child: Wrap(
-                                                crossAxisAlignment:
-                                                    WrapCrossAlignment.center,
-                                                spacing: 8,
-                                                runSpacing: 2,
-                                                children: [
-                                                  Text(
-                                                    exercise
-                                                        .nameController.text
-                                                        .trim(),
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .titleMedium
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.w800,
-                                                        ),
-                                                  ),
-                                                  Text.rich(
-                                                    TextSpan(
-                                                      children: [
-                                                        TextSpan(
-                                                          text:
-                                                              '${exercise.sets.length}',
-                                                          style: Theme.of(context)
-                                                              .textTheme
-                                                              .bodyMedium
-                                                              ?.copyWith(
-                                                                color: scheme
-                                                                    .onSurfaceVariant,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                              ),
-                                                        ),
-                                                        TextSpan(
-                                                          text: ' ${_pluralSets(exercise.sets.length)}',
-                                                          style: Theme.of(context)
-                                                              .textTheme
-                                                              .bodySmall
-                                                              ?.copyWith(
-                                                                color: scheme
-                                                                    .onSurfaceVariant,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            )
-                                          : Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 4),
-                                              child: Row(
-                                                children: [
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment.start,
+                                                child: Row(
                                                   children: [
-                                                    Text(
-                                                      exercise
-                                                          .nameController.text
-                                                          .trim(),
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .titleMedium
-                                                          ?.copyWith(
-                                                            fontWeight:
-                                                                FontWeight.w800,
-                                                          ),
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    if (lastSetState?.loading ==
-                                                        true)
-                                                      Text(
-                                                        'Загружаем прошлый рабочий подход...',
+                                                    Icon(
+                                                        Icons
+                                                            .add_circle_outline,
+                                                        size: 16,
+                                                        color: accent),
+                                                    const SizedBox(width: 8),
+                                                    Flexible(
+                                                      child: Text(
+                                                        'Выберите упражнение',
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
                                                         style: Theme.of(context)
                                                             .textTheme
-                                                            .bodySmall
+                                                            .titleSmall
                                                             ?.copyWith(
-                                                              color: scheme
-                                                                  .onSurfaceVariant,
+                                                              color: accent,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
                                                             ),
-                                                      )
-                                                    else if (lastSetState
-                                                            ?.lastSet !=
-                                                        null)
-                                                      Builder(
-                                                        builder: (context) {
-                                                          final lastWeight =
-                                                              lastSetState!
-                                                                  .lastSet!
-                                                                  .weight
-                                                                  .toDouble();
-                                                          final currentMax = exercise
-                                                              .sets
-                                                              .where((s) =>
-                                                                  s.setType ==
-                                                                  'work')
-                                                              .map((s) =>
-                                                                  double.tryParse(
-                                                                      s.weightController
-                                                                          .text) ??
-                                                                  0.0)
-                                                              .fold(
-                                                                  0.0,
-                                                                  (a, b) =>
-                                                                      a > b
-                                                                          ? a
-                                                                          : b);
-                                                          final hasDelta =
-                                                              currentMax > 0 &&
-                                                                  currentMax !=
-                                                                      lastWeight;
-                                                          final isUp =
-                                                              currentMax >
-                                                                  lastWeight;
-                                                          return Row(
-                                                            mainAxisSize:
-                                                                MainAxisSize
-                                                                    .min,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              )
+                                            : exercise.isCollapsed
+                                                ? Padding(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(vertical: 6),
+                                                    child: Wrap(
+                                                      crossAxisAlignment:
+                                                          WrapCrossAlignment
+                                                              .center,
+                                                      spacing: 8,
+                                                      runSpacing: 2,
+                                                      children: [
+                                                        Text(
+                                                          exercise
+                                                              .nameController
+                                                              .text
+                                                              .trim(),
+                                                          style:
+                                                              Theme.of(context)
+                                                                  .textTheme
+                                                                  .titleMedium
+                                                                  ?.copyWith(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w800,
+                                                                  ),
+                                                        ),
+                                                        Text.rich(
+                                                          TextSpan(
                                                             children: [
-                                                              Text(
-                                                                'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
+                                                              TextSpan(
+                                                                text:
+                                                                    '${exercise.sets.length}',
+                                                                style: Theme.of(
+                                                                        context)
+                                                                    .textTheme
+                                                                    .bodyMedium
+                                                                    ?.copyWith(
+                                                                      color: scheme
+                                                                          .onSurfaceVariant,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                    ),
+                                                              ),
+                                                              TextSpan(
+                                                                text:
+                                                                    ' ${_pluralSets(exercise.sets.length)}',
                                                                 style: Theme.of(
                                                                         context)
                                                                     .textTheme
@@ -1573,286 +1606,410 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                                                           .onSurfaceVariant,
                                                                     ),
                                                               ),
-                                                              if (hasDelta) ...[
-                                                                const SizedBox(
-                                                                    width: 4),
-                                                                Icon(
-                                                                  isUp
-                                                                      ? Icons
-                                                                          .arrow_upward_rounded
-                                                                      : Icons
-                                                                          .arrow_downward_rounded,
-                                                                  size: 12,
-                                                                  color: isUp
-                                                                      ? Colors
-                                                                          .green
-                                                                          .shade500
-                                                                      : scheme
-                                                                          .error,
-                                                                ),
-                                                              ],
                                                             ],
-                                                          );
-                                                        },
-                                                      )
-                                                    else
-                                                      Text(
-                                                        'Подходов: ${exercise.sets.length}',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .bodySmall
-                                                            ?.copyWith(
-                                                              color: scheme
-                                                                  .onSurfaceVariant,
-                                                            ),
-                                                      ),
-                                                  ],
-                                                ),
-                                              ),
-                                              Icon(
-                                                Icons.chevron_right_rounded,
-                                                size: 18,
-                                                color: scheme.onSurfaceVariant
-                                                    .withValues(alpha: 0.5),
-                                              ),
-                                            ],
-                                          ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  )
+                                                : Padding(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(vertical: 4),
+                                                    child: Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Text(
+                                                                exercise
+                                                                    .nameController
+                                                                    .text
+                                                                    .trim(),
+                                                                style: Theme.of(
+                                                                        context)
+                                                                    .textTheme
+                                                                    .titleMedium
+                                                                    ?.copyWith(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w800,
+                                                                    ),
+                                                              ),
+                                                              const SizedBox(
+                                                                  height: 4),
+                                                              if (lastSetState
+                                                                      ?.loading ==
+                                                                  true)
+                                                                Text(
+                                                                  'Загружаем прошлый рабочий подход...',
+                                                                  style: Theme.of(
+                                                                          context)
+                                                                      .textTheme
+                                                                      .bodySmall
+                                                                      ?.copyWith(
+                                                                        color: scheme
+                                                                            .onSurfaceVariant,
+                                                                      ),
+                                                                )
+                                                              else if (lastSetState
+                                                                      ?.lastSet !=
+                                                                  null)
+                                                                Builder(
+                                                                  builder:
+                                                                      (context) {
+                                                                    final lastWeight = lastSetState!
+                                                                        .lastSet!
+                                                                        .weight
+                                                                        .toDouble();
+                                                                    final currentMax = exercise
+                                                                        .sets
+                                                                        .where((s) =>
+                                                                            s.setType ==
+                                                                            'work')
+                                                                        .map((s) =>
+                                                                            double.tryParse(s.weightController.text) ??
+                                                                            0.0)
+                                                                        .fold(
+                                                                            0.0,
+                                                                            (a, b) => a > b
+                                                                                ? a
+                                                                                : b);
+                                                                    final hasDelta = currentMax >
+                                                                            0 &&
+                                                                        currentMax !=
+                                                                            lastWeight;
+                                                                    final isUp =
+                                                                        currentMax >
+                                                                            lastWeight;
+                                                                    return Row(
+                                                                      mainAxisSize:
+                                                                          MainAxisSize
+                                                                              .min,
+                                                                      children: [
+                                                                        Text(
+                                                                          'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}'
+                                                                          '${_recordLabel(exercise.nameController.text)}',
+                                                                          style: Theme.of(context)
+                                                                              .textTheme
+                                                                              .bodySmall
+                                                                              ?.copyWith(
+                                                                                color: scheme.onSurfaceVariant,
+                                                                              ),
+                                                                        ),
+                                                                        if (hasDelta) ...[
+                                                                          const SizedBox(
+                                                                              width: 4),
+                                                                          Icon(
+                                                                            isUp
+                                                                                ? Icons.arrow_upward_rounded
+                                                                                : Icons.arrow_downward_rounded,
+                                                                            size:
+                                                                                12,
+                                                                            color: isUp
+                                                                                ? Colors.green.shade500
+                                                                                : scheme.error,
+                                                                          ),
+                                                                        ],
+                                                                      ],
+                                                                    );
+                                                                  },
+                                                                )
+                                                              else
+                                                                Text(
+                                                                  'Подходов: ${exercise.sets.length}',
+                                                                  style: Theme.of(
+                                                                          context)
+                                                                      .textTheme
+                                                                      .bodySmall
+                                                                      ?.copyWith(
+                                                                        color: scheme
+                                                                            .onSurfaceVariant,
+                                                                      ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                        Icon(
+                                                          Icons
+                                                              .chevron_right_rounded,
+                                                          size: 18,
+                                                          color: scheme
+                                                              .onSurfaceVariant
+                                                              .withValues(
+                                                                  alpha: 0.5),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                      ),
+                                    ),
+                                    if (!exercise.isCollapsed ||
+                                        exercise.noteController.text.isNotEmpty)
+                                      IconButton(
+                                        onPressed: () =>
+                                            _openExerciseNoteDialog(
+                                                exerciseIndex),
+                                        tooltip: 'Заметка к упражнению',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: Icon(
+                                          exercise.noteController.text
+                                                  .isNotEmpty
+                                              ? Icons.sticky_note_2
+                                              : Icons.sticky_note_2_outlined,
+                                          size: 20,
+                                          color: exercise.noteController.text
+                                                  .isNotEmpty
+                                              ? scheme.secondary
+                                              : scheme.onSurfaceVariant
+                                                  .withValues(alpha: 0.5),
                                         ),
-                                ),
-                              ),
-                              if (!exercise.isCollapsed ||
-                                  exercise.noteController.text.isNotEmpty)
-                                IconButton(
-                                  onPressed: () =>
-                                      _openExerciseNoteDialog(exerciseIndex),
-                                  tooltip: 'Заметка к упражнению',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: Icon(
-                                    exercise.noteController.text.isNotEmpty
-                                        ? Icons.sticky_note_2
-                                        : Icons.sticky_note_2_outlined,
-                                    size: 20,
-                                    color:
-                                        exercise.noteController.text.isNotEmpty
-                                            ? scheme.secondary
-                                            : scheme.onSurfaceVariant
-                                                .withValues(alpha: 0.5),
-                                  ),
-                                ),
-                              IconButton(
-                                onPressed: () => setState(
-                                  () => exercise.isCollapsed =
-                                      !exercise.isCollapsed,
-                                ),
-                                tooltip: exercise.isCollapsed
-                                    ? 'Развернуть упражнение'
-                                    : 'Свернуть упражнение',
-                                visualDensity: VisualDensity.compact,
-                                icon: Icon(
-                                  exercise.isCollapsed
-                                      ? Icons.expand_more_rounded
-                                      : Icons.expand_less_rounded,
-                                ),
-                              ),
-                              if (isEmpty && canDelete)
-                                IconButton(
-                                  onPressed: () =>
-                                      _removeExercise(exerciseIndex),
-                                  tooltip: 'Удалить упражнение',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
-                            ],
-                          ),
-                          if (!exercise.isCollapsed &&
-                              exercise.noteController.text.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            GestureDetector(
-                              onTap: () =>
-                                  _openExerciseNoteDialog(exerciseIndex),
-                              child: Container(
-                                margin:
-                                    const EdgeInsets.only(left: 2, right: 2),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color:
-                                      scheme.secondary.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: scheme.secondary
-                                        .withValues(alpha: 0.25),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.sticky_note_2_outlined,
-                                      size: 13,
-                                      color: scheme.secondary,
+                                      ),
+                                    IconButton(
+                                      onPressed: () => setState(
+                                        () => exercise.isCollapsed =
+                                            !exercise.isCollapsed,
+                                      ),
+                                      tooltip: exercise.isCollapsed
+                                          ? 'Развернуть упражнение'
+                                          : 'Свернуть упражнение',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        exercise.isCollapsed
+                                            ? Icons.expand_more_rounded
+                                            : Icons.expand_less_rounded,
+                                      ),
                                     ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        exercise.noteController.text,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: scheme.onSurfaceVariant,
+                                    if (isEmpty && canDelete)
+                                      IconButton(
+                                        onPressed: () =>
+                                            _removeExercise(exerciseIndex),
+                                        tooltip: 'Удалить упражнение',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: const Icon(Icons.delete_outline),
+                                      ),
+                                  ],
+                                ),
+                                if (!exercise.isCollapsed &&
+                                    exercise
+                                        .noteController.text.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  GestureDetector(
+                                    onTap: () =>
+                                        _openExerciseNoteDialog(exerciseIndex),
+                                    child: Container(
+                                      margin: const EdgeInsets.only(
+                                          left: 2, right: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: scheme.secondary
+                                            .withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: scheme.secondary
+                                              .withValues(alpha: 0.25),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.sticky_note_2_outlined,
+                                            size: 13,
+                                            color: scheme.secondary,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              exercise.noteController.text,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color:
+                                                        scheme.onSurfaceVariant,
+                                                  ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
                                       ),
                                     ),
+                                  ),
+                                ],
+                                if (!exercise.isCollapsed) ...[
+                                  const SizedBox(height: 10),
+                                  Builder(builder: (context) {
+                                    final isMobile =
+                                        MediaQuery.sizeOf(context).width < 600;
+                                    final labelStyle = Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant
+                                              .withValues(alpha: 0.6),
+                                        );
+                                    return Padding(
+                                      padding: const EdgeInsets.only(
+                                          left: 38, bottom: 2),
+                                      child: Row(
+                                        children: [
+                                          if (isMobile) ...[
+                                            Expanded(
+                                              child: Center(
+                                                  child: Text('кг',
+                                                      style: labelStyle)),
+                                            ),
+                                            const SizedBox(width: 26),
+                                            Expanded(
+                                              child: Center(
+                                                  child: Text('раз',
+                                                      style: labelStyle)),
+                                            ),
+                                            const SizedBox(width: 72),
+                                          ] else ...[
+                                            SizedBox(
+                                              width: 110,
+                                              child: Center(
+                                                  child: Text('кг',
+                                                      style: labelStyle)),
+                                            ),
+                                            const SizedBox(width: 26),
+                                            SizedBox(
+                                              width: 110,
+                                              child: Center(
+                                                  child: Text('раз',
+                                                      style: labelStyle)),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                  ...List.generate(exercise.sets.length,
+                                      (setIndex) {
+                                    final set = exercise.sets[setIndex];
+                                    return Padding(
+                                      key: set.containerKey,
+                                      padding: EdgeInsets.only(
+                                        bottom:
+                                            setIndex == exercise.sets.length - 1
+                                                ? 0
+                                                : 2,
+                                      ),
+                                      child: _WorkoutSetRow(
+                                        index: setIndex,
+                                        set: set,
+                                        onChanged: _handleDraftChanged,
+                                        onToggleWarmup: () {
+                                          setState(() {
+                                            set.setType =
+                                                set.setType == 'warmup'
+                                                    ? 'work'
+                                                    : 'warmup';
+                                          });
+                                          _handleDraftChanged();
+                                        },
+                                        onDelete: exercise.sets.length == 1
+                                            ? null
+                                            : () => _removeSet(
+                                                exerciseIndex, setIndex),
+                                      ),
+                                    );
+                                  }),
+                                  const SizedBox(height: 6),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      onPressed: () => _addSet(exerciseIndex),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: scheme.secondary,
+                                        visualDensity: VisualDensity.compact,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                      ),
+                                      icon: const Icon(
+                                          Icons.add_circle_outline_rounded,
+                                          size: 16),
+                                      label: const Text('подход',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w600)),
+                                    ),
+                                  ),
+                                  if (!_isFinished && !isEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Builder(builder: (context) {
+                                      final seed = _quickEntrySeed(
+                                        exercise,
+                                        lastSetState?.lastSet,
+                                      );
+                                      return SetQuickEntry(
+                                        key: ObjectKey(exercise),
+                                        setNumber: seed.setNumber,
+                                        initialWeight: seed.weight,
+                                        initialReps: seed.reps,
+                                        restSeconds:
+                                            RestTimerController.lastSeconds,
+                                        onSubmit: (weight, reps, rpe) =>
+                                            _submitQuickSet(exerciseIndex,
+                                                weight, reps, rpe),
+                                      );
+                                    }),
                                   ],
-                                ),
-                              ),
+                                ],
+                              ],
                             ),
-                          ],
-                          if (!exercise.isCollapsed) ...[
-                            const SizedBox(height: 10),
-                            Builder(builder: (context) {
-                              final isMobile =
-                                  MediaQuery.sizeOf(context).width < 600;
-                              final labelStyle = Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color: scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.6),
-                                  );
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.only(left: 38, bottom: 2),
-                                child: Row(
-                                  children: [
-                                    if (isMobile) ...[
-                                      Expanded(
-                                        child: Center(
-                                            child:
-                                                Text('кг', style: labelStyle)),
-                                      ),
-                                      const SizedBox(width: 26),
-                                      Expanded(
-                                        child: Center(
-                                            child:
-                                                Text('раз', style: labelStyle)),
-                                      ),
-                                      const SizedBox(width: 72),
-                                    ] else ...[
-                                      SizedBox(
-                                        width: 110,
-                                        child: Center(
-                                            child:
-                                                Text('кг', style: labelStyle)),
-                                      ),
-                                      const SizedBox(width: 26),
-                                      SizedBox(
-                                        width: 110,
-                                        child: Center(
-                                            child:
-                                                Text('раз', style: labelStyle)),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              );
-                            }),
-                            ...List.generate(exercise.sets.length, (setIndex) {
-                              final set = exercise.sets[setIndex];
-                              return Padding(
-                                key: set.containerKey,
-                                padding: EdgeInsets.only(
-                                  bottom: setIndex == exercise.sets.length - 1
-                                      ? 0
-                                      : 2,
-                                ),
-                                child: _WorkoutSetRow(
-                                  index: setIndex,
-                                  set: set,
-                                  onChanged: _handleDraftChanged,
-                                  onToggleWarmup: () {
-                                    setState(() {
-                                      set.setType = set.setType == 'warmup'
-                                          ? 'work'
-                                          : 'warmup';
-                                    });
-                                    _handleDraftChanged();
-                                  },
-                                  onDelete: exercise.sets.length == 1
-                                      ? null
-                                      : () =>
-                                          _removeSet(exerciseIndex, setIndex),
-                                ),
-                              );
-                            }),
-                            const SizedBox(height: 6),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                onPressed: () => _addSet(exerciseIndex),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: scheme.secondary,
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                ),
-                                icon: const Icon(
-                                    Icons.add_circle_outline_rounded,
-                                    size: 16),
-                                label: const Text('подход',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.w600)),
-                              ),
+                          ),
+                        ),
+                      );
+                    }),
+                    FilledButton.icon(
+                      onPressed: _addExercise,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить упражнение'),
+                    ),
+                    const SizedBox(height: 12),
+                    MuscleHeatmapCard(
+                      loads: heatmapLoads,
+                      showHeader: false,
+                      showMuscleList: true,
+                      emptyMessage:
+                          'Добавьте упражнения с подходами, чтобы увидеть тепловую карту.',
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        'Тоннаж: ${formatTonnage(
+                          _exercises.fold<double>(
+                            0,
+                            (sum, exercise) =>
+                                sum +
+                                calculateExerciseTonnage({
+                                  'sets': exercise.sets.map((set) {
+                                    return {
+                                      'reps': int.tryParse(
+                                              set.repsController.text) ??
+                                          0,
+                                      'weight': _parseWeight(
+                                              set.weightController.text) ??
+                                          0,
+                                    };
+                                  }).toList(),
+                                }),
+                          ),
+                        )}',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
-                          ],
-                        ],
                       ),
                     ),
-                  ),
-                );
-              }),
-              FilledButton.icon(
-                onPressed: _addExercise,
-                icon: const Icon(Icons.add),
-                label: const Text('Добавить упражнение'),
-              ),
-              const SizedBox(height: 12),
-              MuscleHeatmapCard(
-                title: '',
-                subtitle: '',
-                rawLoads: rawLoads,
-                normalizedLoads: normalizedLoads,
-                showHeader: false,
-                emptyMessage:
-                    'Добавьте упражнения с подходами, чтобы увидеть тепловую карту.',
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'Тоннаж: ${formatTonnage(
-                    _exercises.fold<double>(
-                      0,
-                      (sum, exercise) =>
-                          sum +
-                          calculateExerciseTonnage({
-                            'sets': exercise.sets.map((set) {
-                              return {
-                                'reps':
-                                    int.tryParse(set.repsController.text) ?? 0,
-                                'weight':
-                                    _parseWeight(set.weightController.text) ??
-                                        0,
-                              };
-                            }).toList(),
-                          }),
-                    ),
-                  )}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                  ],
                 ),
               ),
             ],
@@ -2026,15 +2183,15 @@ class _ExerciseCatalogSheetState extends State<_ExerciseCatalogSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final normalizedQuery = _query.trim().toLowerCase();
+    final normalizedQuery = normalizeForSearch(_query);
     final filtered = widget.catalog.where((exercise) {
       if (normalizedQuery.isEmpty) {
         return true;
       }
-      final name = (exercise['name'] ?? '').toString().toLowerCase();
-      final primaryMuscle = capitalizeRu(
+      final name = normalizeForSearch((exercise['name'] ?? '').toString());
+      final primaryMuscle = normalizeForSearch(
         (exercise['primary_muscle'] ?? '').toString().replaceAll('_', ' '),
-      ).toLowerCase();
+      );
       return name.contains(normalizedQuery) ||
           primaryMuscle.contains(normalizedQuery);
     }).toList();
@@ -2051,15 +2208,6 @@ class _ExerciseCatalogSheetState extends State<_ExerciseCatalogSheet> {
           height: MediaQuery.of(context).size.height * 0.75,
           child: Column(
             children: [
-              Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              const SizedBox(height: 16),
               TextField(
                 controller: _searchController,
                 onChanged: (value) => setState(() => _query = value),
@@ -2365,9 +2513,8 @@ class _RpeChip extends StatelessWidget {
         ],
       );
     } else {
-      final label = rpe != null
-          ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}'
-          : '@—';
+      final label =
+          rpe != null ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}' : '@—';
       child = Text(
         label,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -2419,15 +2566,6 @@ class _RpePickerSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 42,
-              height: 5,
-              decoration: BoxDecoration(
-                color: scheme.outlineVariant,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(height: 16),
             Row(
               children: [
                 Text(

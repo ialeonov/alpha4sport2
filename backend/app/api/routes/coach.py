@@ -1,19 +1,25 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_owner_user
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.models.user import User
 from app.schemas.coach import (
     CoachChatRequest,
     CoachChatResponse,
     CoachHistoryResponse,
+    CoachMemoryEntry,
+    CoachMemoryResponse,
     CoachWorkoutGenerateRequest,
     CoachWorkoutGenerateResponse,
+    DailyInsightResponse,
+    AiUsageReport,
     OwnerCoachHistoryResponse,
+    ProgressInsightsRequest,
+    ProgressInsightsResponse,
 )
 from app.services.coach_service import CoachService, CoachServiceError
 
@@ -38,6 +44,15 @@ async def coach_history(
             for item in messages
         ]
     }
+
+
+@router.get('/owner/usage', response_model=AiUsageReport)
+async def owner_ai_usage(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_owner_user),
+):
+    return CoachService(db).usage_report(days=max(1, min(days, 365)))
 
 
 @router.get('/owner/history', response_model=OwnerCoachHistoryResponse)
@@ -89,9 +104,24 @@ async def delete_coach_history_message(
     return None
 
 
+async def _run_memory_update(user_id: int, user_text: str, assistant_text: str) -> None:
+    """Фоновое обновление памяти коуча — выполняется после ответа."""
+    db = SessionLocal()
+    try:
+        service = CoachService(db)
+        await service.update_memory_from_exchange(
+            user_id=user_id,
+            user_text=user_text,
+            assistant_text=assistant_text,
+        )
+    finally:
+        db.close()
+
+
 @router.post('/chat', response_model=CoachChatResponse)
 async def coach_chat(
     payload: CoachChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -114,6 +144,12 @@ async def coach_chat(
                 user_text=latest_user_message,
                 assistant_text=result['reply'],
             )
+            background_tasks.add_task(
+                _run_memory_update,
+                user_id=current_user.id,
+                user_text=latest_user_message,
+                assistant_text=result['reply'],
+            )
         return result
     except CoachServiceError as exc:
         error_text = str(exc)
@@ -126,6 +162,7 @@ async def coach_chat(
 @router.post('/chat/stream')
 async def coach_chat_stream(
     payload: CoachChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -136,6 +173,7 @@ async def coach_chat_stream(
     )
     messages = [m.model_dump() for m in payload.messages]
     wellness_entries = [e.model_dump() for e in payload.wellness_entries] if payload.wellness_entries else None
+    user_id = current_user.id
 
     async def generate():
         full_reply = ''
@@ -153,7 +191,13 @@ async def coach_chat_stream(
 
         if payload.save_history and latest_user_message and full_reply:
             service.save_exchange(
-                user_id=current_user.id,
+                user_id=user_id,
+                user_text=latest_user_message,
+                assistant_text=full_reply,
+            )
+            background_tasks.add_task(
+                _run_memory_update,
+                user_id=user_id,
                 user_text=latest_user_message,
                 assistant_text=full_reply,
             )
@@ -168,6 +212,27 @@ async def coach_chat_stream(
             'Connection': 'keep-alive',
         },
     )
+
+
+@router.post('/progress-insights', response_model=ProgressInsightsResponse)
+async def progress_insights(
+    payload: ProgressInsightsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    try:
+        result = await service.generate_progress_insights(
+            exercises=[ex.model_dump() for ex in payload.exercises],
+            user_id=current_user.id,
+        )
+        return result
+    except CoachServiceError as exc:
+        error_text = str(exc)
+        status_code = status.HTTP_502_BAD_GATEWAY
+        if 'не настроен' in error_text.lower():
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        raise HTTPException(status_code=status_code, detail=error_text) from exc
 
 
 @router.post('/generate-workout', response_model=CoachWorkoutGenerateResponse)
@@ -194,3 +259,64 @@ async def generate_coach_workout(
         if 'не настроен' in error_text.lower():
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         raise HTTPException(status_code=status_code, detail=error_text) from exc
+
+
+@router.get('/daily-insight', response_model=DailyInsightResponse)
+async def daily_insight(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    try:
+        return await service.generate_daily_insight(user=current_user)
+    except CoachServiceError as exc:
+        error_text = str(exc)
+        status_code = status.HTTP_502_BAD_GATEWAY
+        if 'не настроен' in error_text.lower():
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        raise HTTPException(status_code=status_code, detail=error_text) from exc
+
+
+@router.get('/memory', response_model=CoachMemoryResponse)
+async def get_coach_memory(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    entries = service.list_memory(user_id=current_user.id)
+    return {
+        'entries': [
+            {
+                'id': e.id,
+                'key': e.key,
+                'value': e.value,
+                'confidence': e.confidence,
+                'source': e.source,
+                'updated_at': e.updated_at.isoformat(),
+            }
+            for e in entries
+        ]
+    }
+
+
+@router.delete('/memory', status_code=status.HTTP_204_NO_CONTENT)
+async def clear_coach_memory(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    service.clear_memory(user_id=current_user.id)
+    return None
+
+
+@router.delete('/memory/{memory_id}', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_coach_memory_entry(
+    memory_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = CoachService(db)
+    deleted = service.delete_memory_entry(user_id=current_user.id, memory_id=memory_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Запись не найдена.')
+    return None

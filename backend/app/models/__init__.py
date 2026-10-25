@@ -1,8 +1,10 @@
 from app.models.account_event import AccountEvent
+from app.models.ai_usage import AiResponseCache, AiUsageEvent
 from app.models.announcement import Announcement
 from app.models.event_like import EventLike
 from app.models.body import BodyEntry
 from app.models.coach import CoachChatMessage
+from app.models.coach_memory import CoachUserMemory
 from app.models.user_profile import UserProfile
 from app.models.wellness import WellnessEntry
 from app.models.progression import (
@@ -46,4 +48,7 @@ __all__ = [
     'ProgressExerciseRecord',
     'ProgressRecordEvent',
     'SickLeave',
+    'CoachUserMemory',
+    'AiUsageEvent',
+    'AiResponseCache',
 ]

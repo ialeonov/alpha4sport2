@@ -9,6 +9,7 @@ import '../../calendar/presentation/calendar_screen.dart';
 import '../../workouts/domain/workout_metrics.dart';
 import '../../coach/presentation/ai_coach_screen.dart';
 import '../../more/presentation/more_screen.dart';
+import '../../progress/presentation/progress_screen.dart';
 import '../../progression/application/progression_controller.dart';
 import '../../progression/presentation/progression_compact_badge.dart';
 import '../../social/presentation/social_hub_screen.dart';
@@ -25,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
   bool _announcementChecked = false;
   final _calendarKey = GlobalKey<CalendarScreenState>();
+  final _progressKey = GlobalKey<ProgressScreenState>();
 
   @override
   void initState() {
@@ -86,6 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       const TodayScreen(),
       CalendarScreen(key: _calendarKey),
+      ProgressScreen(key: _progressKey),
       const AiCoachChat(wrapInBackdrop: true),
       MoreScreen(
         onLogout: _logout,
@@ -96,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const tabs = [
       (Icons.today_rounded, 'Сегодня'),
       (Icons.calendar_month, 'Журнал'),
+      (Icons.insights_rounded, 'Прогресс'),
       (Icons.chat_bubble_rounded, 'Тренер'),
       (Icons.menu_rounded, 'Меню'),
     ];
@@ -126,6 +130,9 @@ class _HomeScreenState extends State<HomeScreen> {
           HapticFeedback.selectionClick();
           if (index == 1 && _index != 1) {
             _calendarKey.currentState?.refresh();
+          }
+          if (index == 2 && _index != 2) {
+            _progressKey.currentState?.refresh();
           }
           setState(() => _index = index);
         },

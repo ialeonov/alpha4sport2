@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Title variants preview</title>
+  <style>
+    @font-face {
+      font-family: "Bebas Neue Cyrillic";
+      src: url("../frontend/assets/fonts/BebasNeue-Cyrillic.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+    }
+
+    :root {
+      --bg: #070b12;
+      --panel: #121b22;
+      --panel-2: #172129;
+      --text: #e7edf1;
+      --muted: #8f9aa5;
+      --accent: #e9cbb1;
+      --cyan: #8ed6df;
+      --green: #5d9844;
+      --line: rgba(231, 237, 241, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page {
+      width: min(1380px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .intro {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+    }
+
+    .intro h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .intro p {
+      max-width: 650px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 390px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .column-label {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .phone,
+    .desktop {
+      overflow: hidden;
+      border: 1px solid rgba(231, 237, 241, 0.08);
+      background:
+        radial-gradient(circle at 15% 0%, rgba(142, 214, 223, 0.08), transparent 28%),
+        linear-gradient(180deg, #090e16 0%, #070b12 100%);
+      box-shadow: 0 20px 52px rgba(0, 0, 0, 0.28);
+    }
+
+    .phone {
+      width: 390px;
+      min-height: 760px;
+      border-radius: 34px;
+      padding: 26px 18px 24px;
+    }
+
+    .desktop {
+      min-height: 260px;
+      border-radius: 22px;
+      padding: 18px 22px 22px;
+    }
+
+    .profile {
+      width: fit-content;
+      min-width: 212px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px 8px 9px;
+      border: 1px solid rgba(231, 237, 241, 0.12);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--text);
+      font-weight: 800;
+      font-size: 14px;
+      margin-bottom: 30px;
+    }
+
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #164f55;
+      color: white;
+    }
+
+    .variant {
+      padding: 0 2px 28px;
+      border-bottom: 1px solid rgba(231, 237, 241, 0.08);
+    }
+
+    .variant:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .variant-name {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .title {
+      margin: 0 0 22px;
+      color: var(--accent);
+      font-family: "Bebas Neue Cyrillic", Impact, sans-serif;
+      text-transform: uppercase;
+      white-space: nowrap;
+      letter-spacing: 0;
+    }
+
+    .current-mobile {
+      font-size: 62px;
+      line-height: 0.94;
+      transform: scaleX(1.08);
+      transform-origin: left center;
+    }
+
+    .current-desktop {
+      width: 100%;
+      font-size: 44px;
+      line-height: 1;
+      letter-spacing: 2px;
+      transform: scaleX(4.15);
+      transform-origin: left center;
+    }
+
+    .poster-mobile {
+      font-size: clamp(50px, 15vw, 66px);
+      line-height: 0.92;
+      letter-spacing: 0.025em;
+    }
+
+    .poster-desktop {
+      font-size: clamp(54px, 5vw, 76px);
+      line-height: 0.92;
+      letter-spacing: 0.04em;
+    }
+
+    .compact-mobile {
+      font-size: 50px;
+      line-height: 0.96;
+      letter-spacing: 0.02em;
+    }
+
+    .compact-desktop {
+      font-size: clamp(46px, 4vw, 58px);
+      line-height: 0.96;
+      letter-spacing: 0.035em;
+    }
+
+    .label {
+      margin: 0 0 8px;
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .labelled-mobile {
+      font-size: 54px;
+      line-height: 0.94;
+      letter-spacing: 0.025em;
+    }
+
+    .labelled-desktop {
+      font-size: clamp(50px, 4.4vw, 66px);
+      line-height: 0.94;
+      letter-spacing: 0.035em;
+    }
+
+    .plain-mobile {
+      color: var(--text);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 38px;
+      font-weight: 950;
+      line-height: 1.02;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .plain-desktop {
+      color: var(--text);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: clamp(42px, 3.8vw, 62px);
+      font-weight: 950;
+      line-height: 1.02;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .card {
+      border-radius: 28px;
+      background: var(--panel);
+      border: 1px solid rgba(231, 237, 241, 0.08);
+      padding: 20px;
+    }
+
+    .calendar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .calendar-head strong {
+      font-size: 24px;
+      letter-spacing: 0.02em;
+    }
+
+    .calendar-head span {
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 24px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      text-align: center;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .day {
+      min-height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .day.active {
+      background: var(--accent);
+      color: #1f262b;
+    }
+
+    .desktop .variant {
+      padding-bottom: 22px;
+    }
+
+    .desktop-row {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.7fr) minmax(360px, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .desktop .card {
+      border-radius: 20px;
+      padding: 18px;
+    }
+
+    .notes {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .notes b {
+      color: var(--text);
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .phone {
+        width: 100%;
+      }
+
+      .desktop-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <div>
+        <h1>Варианты заголовков разделов</h1>
+      </div>
+      <p>
+        Сравнение текущей растяжки и трех более универсальных решений.
+        Смотреть лучше на ширине браузера: мобильный блок показывает телефон,
+        десктопный блок показывает, что происходит с длинной строкой.
+      </p>
+    </header>
+
+    <section class="grid">
+      <div>
+        <p class="column-label">Mobile</p>
+        <div class="phone stack">
+          <div class="profile"><span class="avatar">И</span>Иван Леонов · Lv.5 · 🔥 7</div>
+
+          <article class="variant">
+            <p class="variant-name">Сейчас: растяжка до ширины</p>
+            <h2 class="title current-mobile">Календарь</h2>
+            <div class="card">
+              <div class="calendar-head"><span>‹</span><strong>Апрель 2026</strong><span>›</span></div>
+              <div class="mini-grid">
+                <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+                <span class="day">1</span><span class="day">2</span><span class="day">3</span><span class="day">4</span><span class="day">5</span><span class="day">6</span><span class="day">7</span>
+                <span class="day">8</span><span class="day">9</span><span class="day">10</span><span class="day">11</span><span class="day">12</span><span class="day">13</span><span class="day">14</span>
+                <span class="day">15</span><span class="day">16</span><span class="day">17</span><span class="day">18</span><span class="day">19</span><span class="day">20</span><span class="day active">23</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 1: постерный, но не резиновый</p>
+            <h2 class="title poster-mobile">Календарь</h2>
+            <div class="card notes"><b>Мой фаворит.</b><span>Оставляет характер Bebas, но не пытается заполнить всю строку любой ценой.</span></div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 2: компактнее и спокойнее</p>
+            <h2 class="title compact-mobile">Прогресс</h2>
+            <div class="card notes"><b>Самый безопасный.</b><span>Хорош для плотных экранов, где контент важнее обложечности.</span></div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 3: надметка + display</p>
+            <p class="label">Раздел</p>
+            <h2 class="title labelled-mobile">Инструменты</h2>
+            <div class="card notes"><b>Более “продуктовый”.</b><span>Добавляет структуру, но может быть лишним, если хочется суровой простоты.</span></div>
+          </article>
+        </div>
+      </div>
+
+      <div>
+        <p class="column-label">Desktop</p>
+        <div class="desktop stack">
+          <article class="variant">
+            <p class="variant-name">Сейчас: слово становится декором</p>
+            <div class="desktop-row">
+              <div>
+                <h2 class="title current-desktop">Прогресс</h2>
+              </div>
+              <div class="card notes">
+                <b>Проблема:</b>
+                <span>На большой ширине масштаб по X превращает слово в ленту. Это выглядит как баг, особенно рядом с аккуратными карточками.</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 1: постерный</p>
+            <div class="desktop-row">
+              <div>
+                <h2 class="title poster-desktop">Календарь</h2>
+              </div>
+              <div class="card notes">
+                <b>CSS-идея:</b>
+                <span>font-size: clamp(54px, 5vw, 76px); letter-spacing: 0.04em; без scaleX.</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 2: компактный</p>
+            <div class="desktop-row">
+              <div>
+                <h2 class="title compact-desktop">Прогресс</h2>
+              </div>
+              <div class="card notes">
+                <b>CSS-идея:</b>
+                <span>font-size: clamp(46px, 4vw, 58px); больше воздуха между заголовком и контентом.</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 3: надметка</p>
+            <div class="desktop-row">
+              <div>
+                <p class="label">Раздел</p>
+                <h2 class="title labelled-desktop">Инструменты</h2>
+              </div>
+              <div class="card notes">
+                <b>CSS-идея:</b>
+                <span>Маленький технический label + крупный display-заголовок. Универсально для любых названий.</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="variant">
+            <p class="variant-name">Вариант 4: без display-шрифта</p>
+            <div class="desktop-row">
+              <div>
+                <h2 class="title plain-desktop">Календарь</h2>
+              </div>
+              <div class="card notes">
+                <b>Запасной путь:</b>
+                <span>Более современно и спокойно, но теряется спортивный характер текущей айдентики.</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

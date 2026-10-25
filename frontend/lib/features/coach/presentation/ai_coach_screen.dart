@@ -314,6 +314,31 @@ class _AiCoachChatState extends State<AiCoachChat>
 
   bool get _hasHistory => _messages.any((m) => m.id != null);
 
+  Future<void> _editMessage(int index) async {
+    if (_isSending) return;
+    final message = _messages[index];
+
+    // Собираем все сообщения начиная с редактируемого
+    final toDelete = _messages
+        .skip(index)
+        .where((m) => m.id != null)
+        .map((m) => m.id!)
+        .toList();
+
+    // Удаляем с сервера (не ждём — fire and forget)
+    if (toDelete.isNotEmpty) {
+      Future.wait(toDelete.map(BackendApi.deleteCoachMessage))
+          .catchError((_) => <void>[]);
+    }
+
+    setState(() {
+      _messages.removeRange(index, _messages.length);
+      if (_messages.isEmpty) _messages.add(_introMessage);
+      _controller.text = message.text;
+      _controller.selection = TextSelection.collapsed(offset: message.text.length);
+    });
+  }
+
   Future<void> _clearHistory() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -561,13 +586,7 @@ class _AiCoachChatState extends State<AiCoachChat>
                               child: _ChatBubble(
                                 message: message,
                                 onEdit: message.role == 'user'
-                                    ? () {
-                                        _controller.text = message.text;
-                                        _controller.selection =
-                                            TextSelection.collapsed(
-                                          offset: message.text.length,
-                                        );
-                                      }
+                                    ? () => _editMessage(idx)
                                     : null,
                               ),
                             ),

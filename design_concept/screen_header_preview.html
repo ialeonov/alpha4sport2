@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screen header preview</title>
+  <style>
+    :root {
+      --bg: #070b12;
+      --panel: #121b22;
+      --panel-2: #18232b;
+      --text: #eef2f4;
+      --muted: #99a4af;
+      --soft: rgba(238, 242, 244, 0.1);
+      --accent: #e9cbb1;
+      --cyan: #8ed6df;
+      --green: #70a859;
+      --warn: #dba95d;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page {
+      width: min(1340px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .intro {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--soft);
+    }
+
+    .intro h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.1;
+    }
+
+    .intro p {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 390px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .label {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .phone,
+    .desktop {
+      overflow: hidden;
+      border: 1px solid rgba(238, 242, 244, 0.08);
+      background: linear-gradient(180deg, #090e16 0%, #070b12 100%);
+      box-shadow: 0 20px 52px rgba(0, 0, 0, 0.26);
+    }
+
+    .phone {
+      width: 390px;
+      height: 812px;
+      border-radius: 34px;
+    }
+
+    .desktop {
+      min-height: 812px;
+      border-radius: 22px;
+    }
+
+    .status {
+      height: 42px;
+      border-bottom: 1px solid rgba(238, 242, 244, 0.08);
+    }
+
+    .content {
+      padding: 18px 18px 96px;
+    }
+
+    .desktop .content {
+      padding: 18px 24px 36px;
+    }
+
+    .profile {
+      width: fit-content;
+      min-width: 226px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px 8px 9px;
+      margin-bottom: 18px;
+      border: 1px solid rgba(238, 242, 244, 0.12);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.035);
+      font-weight: 820;
+      font-size: 14px;
+    }
+
+    .avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #164f55;
+    }
+
+    .screen-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .screen-header h2 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.04;
+      letter-spacing: 0;
+      font-weight: 950;
+    }
+
+    .screen-header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .desktop .screen-header h2 {
+      font-size: 38px;
+    }
+
+    .desktop .screen-header p {
+      font-size: 15px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(238, 242, 244, 0.1);
+      border-radius: 14px;
+      background: rgba(238, 242, 244, 0.045);
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+      font-size: 19px;
+    }
+
+    .stat-row {
+      display: flex;
+      gap: 8px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+
+    .chip {
+      min-width: 0;
+      padding: 9px 11px;
+      border-radius: 999px;
+      background: rgba(238, 242, 244, 0.055);
+      border: 1px solid rgba(238, 242, 244, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 820;
+      white-space: nowrap;
+    }
+
+    .chip b {
+      color: var(--text);
+    }
+
+    .chip.good b {
+      color: var(--green);
+    }
+
+    .chip.hot b {
+      color: var(--accent);
+    }
+
+    .card {
+      border-radius: 24px;
+      background: var(--panel);
+      border: 1px solid rgba(238, 242, 244, 0.08);
+      padding: 18px;
+      margin-bottom: 12px;
+    }
+
+    .calendar-card {
+      min-height: 386px;
+      padding: 22px 16px;
+    }
+
+    .calendar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .calendar-head strong {
+      font-size: 24px;
+    }
+
+    .calendar-head span {
+      color: var(--muted);
+      font-size: 27px;
+      font-weight: 800;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+      text-align: center;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .day {
+      min-height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      color: var(--text);
+      font-weight: 760;
+    }
+
+    .day.done {
+      background: rgba(238, 242, 244, 0.07);
+    }
+
+    .day.active {
+      background: var(--accent);
+      color: #20262a;
+    }
+
+    .section-title {
+      margin: 20px 4px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .workout {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      min-height: 138px;
+    }
+
+    .heatmap {
+      height: 112px;
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at 28% 42%, #f17c32 0 12%, transparent 13%),
+        radial-gradient(circle at 48% 52%, #efd85f 0 11%, transparent 12%),
+        radial-gradient(circle at 68% 48%, #d75142 0 8%, transparent 9%),
+        #17212a;
+    }
+
+    .workout h3 {
+      margin: 0 0 12px;
+      font-size: 22px;
+      line-height: 1.12;
+    }
+
+    .workout p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .share {
+      color: var(--muted);
+      font-size: 28px;
+    }
+
+    .progress-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .exercise {
+      min-height: 64px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      border-radius: 18px;
+      background: var(--panel-2);
+      border-left: 4px solid var(--green);
+    }
+
+    .exercise strong {
+      font-size: 14px;
+    }
+
+    .exercise span {
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .desktop-layout {
+      display: grid;
+      grid-template-columns: minmax(440px, 0.9fr) minmax(380px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .bottom-nav {
+      position: absolute;
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .phone {
+        width: 100%;
+      }
+
+      .desktop-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <h1>Компактный screen header</h1>
+      <p>
+        Идея: верх экрана не занимает роль постера. Он дает ориентацию,
+        быстрый контекст и действия, а уникальность появляется через первый
+        полезный блок каждого раздела.
+      </p>
+    </header>
+
+    <section class="grid">
+      <div>
+        <p class="label">Mobile: календарь</p>
+        <div class="phone">
+          <div class="status"></div>
+          <div class="content">
+            <div class="profile"><span class="avatar">И</span>Иван Леонов · Lv.5 · 🔥 7</div>
+
+            <header class="screen-header">
+              <div>
+                <h2>Календарь</h2>
+                <p>Апрель 2026 · 10 тренировок</p>
+              </div>
+              <div class="actions">
+                <button class="icon-btn">⌁</button>
+                <button class="icon-btn">＋</button>
+              </div>
+            </header>
+
+            <div class="stat-row">
+              <div class="chip hot"><b>Сегодня</b> 23 апр</div>
+              <div class="chip"><b>7</b> дней серии</div>
+              <div class="chip good"><b>10</b> тренировок</div>
+            </div>
+
+            <section class="card calendar-card">
+              <div class="calendar-head"><span>‹</span><strong>Апрель 2026</strong><span>›</span></div>
+              <div class="mini-grid">
+                <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+                <span class="day">1</span><span class="day done">2</span><span class="day">3</span><span class="day done">4</span><span class="day">5</span><span class="day">6</span><span class="day done">7</span>
+                <span class="day">8</span><span class="day done">9</span><span class="day">10</span><span class="day">11</span><span class="day done">12</span><span class="day">13</span><span class="day done">14</span>
+                <span class="day">15</span><span class="day done">16</span><span class="day">17</span><span class="day done">18</span><span class="day">19</span><span class="day">20</span><span class="day done">21</span>
+                <span class="day">22</span><span class="day active">23</span><span class="day">24</span><span class="day">25</span><span class="day">26</span><span class="day">27</span><span class="day">28</span>
+              </div>
+            </section>
+
+            <h3 class="section-title">Тренировки за 23 апреля</h3>
+            <section class="card workout">
+              <div class="heatmap"></div>
+              <div>
+                <h3>Тренировка 23.04</h3>
+                <p>Тоннаж: 17.92 т</p>
+              </div>
+              <div class="share">⇧</div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="label">Desktop: прогресс</p>
+        <div class="desktop">
+          <div class="content">
+            <div class="profile"><span class="avatar">И</span>HungryDaze · Lv.4 · 🔥 6</div>
+
+            <header class="screen-header">
+              <div>
+                <h2>Прогресс</h2>
+                <p>18 упражнений · 13 к росту · 5 в норме</p>
+              </div>
+              <div class="actions">
+                <button class="icon-btn">⌕</button>
+                <button class="icon-btn">☰</button>
+              </div>
+            </header>
+
+            <div class="stat-row">
+              <div class="chip good"><b>13</b> к росту</div>
+              <div class="chip"><b>5</b> норма</div>
+              <div class="chip"><b>0</b> внимание</div>
+              <div class="chip hot"><b>+145 кг</b> лучший прирост</div>
+            </div>
+
+            <div class="desktop-layout">
+              <section class="card">
+                <div class="calendar-head"><strong>Распределение</strong><span></span></div>
+                <div style="height: 12px; border-radius: 999px; overflow: hidden; background: rgba(238,242,244,.1);">
+                  <div style="width: 72%; height: 100%; background: var(--green);"></div>
+                </div>
+                <div class="progress-list">
+                  <div class="exercise"><strong>Гиперэкстензия горизонтальная</strong><span>↑ 40 кг</span></div>
+                  <div class="exercise"><strong>Жим груди сидя</strong><span>↑ 80 кг</span></div>
+                  <div class="exercise"><strong>Жим ногами горизонтальный</strong><span>↑ 145 кг</span></div>
+                  <div class="exercise"><strong>Подъем на носки сидя</strong><span>↑ 55 кг</span></div>
+                </div>
+              </section>
+
+              <section class="card">
+                <div class="calendar-head"><strong>Почему это работает</strong><span></span></div>
+                <p style="margin: 0; color: var(--muted); line-height: 1.55;">
+                  Заголовок занимает около 70-90 пикселей вместе с метриками,
+                  но сразу сообщает состояние экрана. Первый полезный блок
+                  начинается выше, чем при большом display-заголовке.
+                </p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

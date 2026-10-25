@@ -5,11 +5,11 @@ from pydantic import BaseModel, Field
 
 class BodyEntryCreate(BaseModel):
     entry_date: date
-    weight_kg: float | None = Field(default=None, ge=0)
-    waist_cm: float | None = Field(default=None, ge=0)
-    chest_cm: float | None = Field(default=None, ge=0)
-    hips_cm: float | None = Field(default=None, ge=0)
-    notes: str | None = None
+    weight_kg: float | None = Field(default=None, ge=0, le=500)
+    waist_cm: float | None = Field(default=None, ge=0, le=300)
+    chest_cm: float | None = Field(default=None, ge=0, le=300)
+    hips_cm: float | None = Field(default=None, ge=0, le=300)
+    notes: str | None = Field(default=None, max_length=500)
     photo_path: str | None = None
 
 

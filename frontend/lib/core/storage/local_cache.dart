@@ -11,6 +11,7 @@ class LocalCache {
     CacheKeys.bodyEntriesCache,
     CacheKeys.bodyweightTrendCache,
     CacheKeys.weeklyVolumeCache,
+    CacheKeys.progressInsightsCache,
     // activeWorkoutDraft and workout_draft_* are user data, not session data —
     // they must survive session expiry so the user can resume after re-login.
   };
@@ -58,4 +59,6 @@ class CacheKeys {
   static const activeWorkoutDraft = 'active_workout_draft';
   static const customPrograms = 'custom_programs';
   static const offlineMutations = 'offline_mutations';
+  static const coachDailyInsight = 'coach_daily_insight';
+  static const progressInsightsCache = 'progress_insights_cache';
 }

@@ -21,6 +21,7 @@ class ProgressionProfileData {
     required this.currentWeek,
     required this.currentMonth,
     required this.recentAchievements,
+    this.achievementCatalog = const [],
     required this.recentRecords,
     required this.allExerciseRecords,
     required this.recentRewards,
@@ -48,6 +49,9 @@ class ProgressionProfileData {
   final WeekProgressData currentWeek;
   final MonthProgressData currentMonth;
   final List<AchievementData> recentAchievements;
+
+  /// Все достижения, включая ещё не полученные, с прогрессом к цели.
+  final List<AchievementCatalogItem> achievementCatalog;
   final List<RecordData> recentRecords;
   final List<ExerciseRecordData> allExerciseRecords;
   final List<RewardData> recentRewards;
@@ -90,6 +94,11 @@ class ProgressionProfileData {
       recentAchievements: ((json['recentAchievements'] as List?) ?? const [])
           .cast<Map>()
           .map((item) => AchievementData.fromJson(item.cast<String, dynamic>()))
+          .toList(),
+      achievementCatalog: ((json['achievementCatalog'] as List?) ?? const [])
+          .cast<Map>()
+          .map((item) =>
+              AchievementCatalogItem.fromJson(item.cast<String, dynamic>()))
           .toList(),
       recentRecords: ((json['recentRecords'] as List?) ?? const [])
           .cast<Map>()
@@ -193,6 +202,41 @@ class AchievementData {
       code: (json['code'] ?? '').toString(),
       title: (json['title'] ?? '').toString(),
       achievedAt: DateTime.parse((json['achievedAt'] ?? '').toString()).toLocal(),
+    );
+  }
+}
+
+class AchievementCatalogItem {
+  const AchievementCatalogItem({
+    required this.code,
+    required this.title,
+    required this.description,
+    required this.unlocked,
+    required this.achievedAt,
+    required this.progress,
+    required this.target,
+  });
+
+  final String code;
+  final String title;
+  final String description;
+  final bool unlocked;
+  final DateTime? achievedAt;
+  final int progress;
+  final int target;
+
+  double get ratio => target <= 0 ? 0 : (progress / target).clamp(0, 1);
+
+  factory AchievementCatalogItem.fromJson(Map<String, dynamic> json) {
+    return AchievementCatalogItem(
+      code: (json['code'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      description: (json['description'] ?? '').toString(),
+      unlocked: json['unlocked'] == true,
+      achievedAt: DateTime.tryParse((json['achievedAt'] ?? '').toString())
+          ?.toLocal(),
+      progress: (json['progress'] as num?)?.toInt() ?? 0,
+      target: (json['target'] as num?)?.toInt() ?? 1,
     );
   }
 }

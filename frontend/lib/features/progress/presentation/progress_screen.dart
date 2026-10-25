@@ -2,11 +2,14 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/network/backend_api.dart';
+import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../heatmap/presentation/muscle_volume_view.dart';
 import '../application/progress_analysis_service.dart';
 import '../domain/progress_models.dart';
+import '../../../core/utils/search.dart';
 
 // ── Decision colors ──────────────────────────────────────────────────────────
 
@@ -14,37 +17,34 @@ const _colorIncrease = Color(0xFF2E7D32);
 const _colorAttention = Color(0xFFE65100);
 const _colorKeep = Color(0xFF546E7A);
 
+bool _needsAttention(ExerciseProgressAnalysis a) =>
+    a.decision == ProgressDecision.decrease ||
+    a.decision == ProgressDecision.insufficientData ||
+    a.isStalled;
+
 Color _decisionColor(ExerciseProgressAnalysis a) {
-  if (a.decision == ProgressDecision.increase) {
-    return _colorIncrease;
-  }
-  if (a.decision == ProgressDecision.decrease ||
-      a.decision == ProgressDecision.insufficientData ||
-      a.isStalled) {
-    return _colorAttention;
-  }
+  if (a.decision == ProgressDecision.increase) return _colorIncrease;
+  if (_needsAttention(a)) return _colorAttention;
   return _colorKeep;
 }
 
 int _decisionPriority(ExerciseProgressAnalysis a) {
-  if (a.decision == ProgressDecision.increase) {
-    return 0;
-  }
-  if (a.decision == ProgressDecision.decrease ||
-      a.decision == ProgressDecision.insufficientData ||
-      a.isStalled) {
-    return 1;
-  }
+  if (a.decision == ProgressDecision.increase) return 0;
+  if (_needsAttention(a)) return 1;
   return 2;
 }
 
-// ── Combined load result ─────────────────────────────────────────────────────
+// ── Loaded data ──────────────────────────────────────────────────────────────
 
 class _ProgressData {
-  const _ProgressData({required this.report, required this.muscleMap});
+  const _ProgressData({
+    required this.report,
+    required this.workouts,
+    required this.catalog,
+  });
   final ProgressAnalysisReport report;
-  // exerciseName.toLowerCase() → primary_muscle
-  final Map<String, String> muscleMap;
+  final List<Map<String, dynamic>> workouts;
+  final List<Map<String, dynamic>> catalog;
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
@@ -124,29 +124,43 @@ List<_ExerciseRecords> _computeRecords(ProgressAnalysisReport report) {
 
 enum _FilterTab { all, increase, keep, attention }
 
+/// Вкладки экрана «Прогресс».
+enum ProgressTab { recommendations, muscles, records }
+
 // ── Screen ──────────────────────────────────────────────────────────────────
 
+/// Единый экран прогресса: рекомендации по весам, объём по мышцам и рекорды.
 class ProgressScreen extends StatefulWidget {
-  const ProgressScreen({super.key});
+  const ProgressScreen({
+    super.key,
+    this.initialTab = ProgressTab.recommendations,
+  });
+
+  final ProgressTab initialTab;
 
   @override
-  State<ProgressScreen> createState() => _ProgressScreenState();
+  State<ProgressScreen> createState() => ProgressScreenState();
 }
 
-class _ProgressScreenState extends State<ProgressScreen>
+class ProgressScreenState extends State<ProgressScreen>
     with SingleTickerProviderStateMixin {
   static const _service = ProgressAnalysisService();
 
   late Future<_ProgressData> _future;
-  late TabController _tabController;
+  // Общий комментарий коуча грузится отдельно и не блокирует экран.
+  late Future<String> _summaryFuture;
+  late final TabController _tabController = TabController(
+    length: ProgressTab.values.length,
+    vsync: this,
+    initialIndex: widget.initialTab.index,
+  );
   final TextEditingController _searchController = TextEditingController();
   _FilterTab _activeFilter = _FilterTab.all;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _future = _loadData();
+    _reload();
   }
 
   @override
@@ -156,61 +170,98 @@ class _ProgressScreenState extends State<ProgressScreen>
     super.dispose();
   }
 
-  Future<_ProgressData> _loadData() async {
-    final results = await Future.wait([
-      _loadWorkouts(),
-      _loadTemplates(),
-      _loadCatalog(),
-    ]);
-    final workouts = results[0];
-    final templates = results[1];
-    final catalog = results[2];
-
-    final report =
-        _service.buildReport(workouts: workouts, templates: templates);
-    final muscleMap = {
-      for (final ex in catalog)
-        (ex['name'] as String? ?? '').trim().toLowerCase():
-            (ex['primary_muscle'] as String? ?? '').trim(),
-    };
-    return _ProgressData(report: report, muscleMap: muscleMap);
+  void _reload() {
+    _future = _loadData();
+    _summaryFuture = _future.then((data) => _fetchSummary(data.report));
   }
 
-  Future<List<Map<String, dynamic>>> _loadWorkouts() => BackendApi.getWorkouts();
-
-  Future<List<Map<String, dynamic>>> _loadTemplates() async {
-    try {
-      return await BackendApi.getTemplates();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _loadCatalog() async {
-    try {
-      return await BackendApi.getExercises();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  Future<void> _refresh() async {
-    setState(() => _future = _loadData());
+  /// Перезагружает данные, например при переключении на вкладку в навигации.
+  Future<void> refresh() async {
+    setState(_reload);
     await _future;
   }
 
-  List<ExerciseProgressAnalysis> _sorted(ProgressAnalysisReport report) {
-    return List<ExerciseProgressAnalysis>.from(report.allExercises)
+  Future<_ProgressData> _loadData() async {
+    final results = await Future.wait([
+      BackendApi.getWorkouts(),
+      _loadOptional(BackendApi.getTemplates),
+      _loadOptional(BackendApi.getExercises),
+    ]);
+    return _ProgressData(
+      report: _service.buildReport(workouts: results[0], templates: results[1]),
+      workouts: results[0],
+      catalog: results[2],
+    );
+  }
+
+  static Future<List<Map<String, dynamic>>> _loadOptional(
+    Future<List<Map<String, dynamic>>> Function() loader,
+  ) async {
+    try {
+      return await loader();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<String> _fetchSummary(ProgressAnalysisReport report) async {
+    if (report.allExercises.isEmpty) return '';
+
+    final cached = LocalCache.get<Map>(CacheKeys.progressInsightsCache);
+    final cachedAt = cached?['cached_at'] as int?;
+    if (cachedAt != null &&
+        DateTime.now().millisecondsSinceEpoch - cachedAt <
+            const Duration(hours: 24).inMilliseconds) {
+      return (cached!['summary'] as String? ?? '').trim();
+    }
+
+    try {
+      final exercises = report.allExercises.map((a) {
+        final sessions = a.sessions.reversed.take(3).map((s) => {
+              'date': s.performedAt.toIso8601String().split('T').first,
+              'weight': s.workingSet.weight,
+              'reps': s.workingSet.reps,
+              'estimated_1rm': s.workingSet.estimated1rm,
+            }).toList();
+        final decisionKey = a.isStalled
+            ? 'stalled'
+            : switch (a.decision) {
+                ProgressDecision.increase => 'increase',
+                ProgressDecision.decrease => 'decrease',
+                ProgressDecision.keep => 'keep',
+                ProgressDecision.insufficientData => 'insufficient_data',
+              };
+        return {
+          'name': a.exerciseName,
+          'decision': decisionKey,
+          'rep_range': a.repRange.label,
+          'recommended_weight': a.recommendedNextWeight,
+          'delta_weight': a.deltaWeight,
+          'confidence': a.confidenceScore,
+          'sessions': sessions,
+        };
+      }).take(50).toList();
+
+      final result = await BackendApi.getProgressInsights(exercises);
+      final summary = (result?['summary'] as String? ?? '').trim();
+      await LocalCache.put(CacheKeys.progressInsightsCache, {
+        'summary': summary,
+        'cached_at': DateTime.now().millisecondsSinceEpoch,
+      });
+      return summary;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  List<ExerciseProgressAnalysis> _applyFilter(
+      ProgressAnalysisReport report, String query) {
+    final sorted = List<ExerciseProgressAnalysis>.from(report.allExercises)
       ..sort((a, b) {
         final p = _decisionPriority(a) - _decisionPriority(b);
         if (p != 0) return p;
         return a.exerciseName.compareTo(b.exerciseName);
       });
-  }
-
-  List<ExerciseProgressAnalysis> _applyFilter(
-      ProgressAnalysisReport report, String query) {
-    final sorted = _sorted(report);
     final afterFilter = switch (_activeFilter) {
       _FilterTab.all => sorted,
       _FilterTab.increase =>
@@ -218,16 +269,11 @@ class _ProgressScreenState extends State<ProgressScreen>
       _FilterTab.keep => sorted
           .where((a) => a.decision == ProgressDecision.keep && !a.isStalled)
           .toList(),
-      _FilterTab.attention => sorted
-          .where((a) =>
-              a.decision == ProgressDecision.decrease ||
-              a.decision == ProgressDecision.insufficientData ||
-              a.isStalled)
-          .toList(),
+      _FilterTab.attention => sorted.where(_needsAttention).toList(),
     };
     if (query.isEmpty) return afterFilter;
     return afterFilter
-        .where((a) => a.exerciseName.toLowerCase().contains(query))
+        .where((a) => normalizeForSearch(a.exerciseName).contains(query))
         .toList();
   }
 
@@ -248,206 +294,44 @@ class _ProgressScreenState extends State<ProgressScreen>
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _ProgressDataTab(
-                  future: _future,
-                  builder: (data) => _StatisticsTab(
-                    report: data.report,
-                    onRefresh: _refresh,
+            child: FutureBuilder<_ProgressData>(
+              future: _future,
+              builder: (context, snapshot) {
+                // При обновлении показываем прежние данные, пока грузятся новые.
+                if (snapshot.hasData) {
+                  return _buildTabs(snapshot.data!);
+                }
+                if (!snapshot.hasError) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      BackendApi.describeError(
+                        snapshot.error!,
+                        fallback: 'Не удалось загрузить прогресс.',
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                ),
-                _ProgressDataTab(
-                  future: _future,
-                  builder: (data) {
-                    final stats = _computeStats(data.report);
-                    return _RecommendationsTab(
-                      report: data.report,
-                      stats: stats,
-                      searchController: _searchController,
-                      activeFilter: _activeFilter,
-                      onFilterChanged: (tab) => setState(() {
-                        _activeFilter = tab;
-                        _searchController.clear();
-                      }),
-                      onSearchChanged: () => setState(() {}),
-                      applyFilter: _applyFilter,
-                      onRefresh: _refresh,
-                    );
-                  },
-                ),
-              ],
+                );
+              },
             ),
           ),
         ],
       ),
     );
   }
-}
 
-// ── Statistics screen ────────────────────────────────────────────────────────
-
-class StatisticsScreen extends StatefulWidget {
-  const StatisticsScreen({super.key});
-
-  @override
-  State<StatisticsScreen> createState() => _StatisticsScreenState();
-}
-
-class _StatisticsScreenState extends State<StatisticsScreen> {
-  static const _service = ProgressAnalysisService();
-  late Future<_ProgressData> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _load();
-  }
-
-  Future<_ProgressData> _load() async {
-    final results = await Future.wait([_workouts(), _templates(), _catalog()]);
-    final report =
-        _service.buildReport(workouts: results[0], templates: results[1]);
-    final muscleMap = {
-      for (final ex in results[2])
-        (ex['name'] as String? ?? '').trim().toLowerCase():
-            (ex['primary_muscle'] as String? ?? '').trim(),
-    };
-    return _ProgressData(report: report, muscleMap: muscleMap);
-  }
-
-  Future<List<Map<String, dynamic>>> _workouts() => BackendApi.getWorkouts();
-
-  Future<List<Map<String, dynamic>>> _templates() async {
-    try {
-      return await BackendApi.getTemplates();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _catalog() async {
-    try {
-      return await BackendApi.getExercises();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _ProgressDataTab(
-      future: _future,
-      builder: (data) => _StatisticsTab(
-        report: data.report,
-        onRefresh: () async {
-          setState(() => _future = _load());
-          await _future;
-        },
-      ),
-    );
-  }
-}
-
-// ── Recommendations screen ────────────────────────────────────────────────────
-
-class RecommendationsScreen extends StatefulWidget {
-  const RecommendationsScreen({super.key});
-
-  @override
-  State<RecommendationsScreen> createState() => _RecommendationsScreenState();
-}
-
-class _RecommendationsScreenState extends State<RecommendationsScreen> {
-  static const _service = ProgressAnalysisService();
-  late Future<_ProgressData> _future;
-  final TextEditingController _searchController = TextEditingController();
-  _FilterTab _activeFilter = _FilterTab.all;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _load();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  Future<_ProgressData> _load() async {
-    final results = await Future.wait([_workouts(), _templates(), _catalog()]);
-    final report =
-        _service.buildReport(workouts: results[0], templates: results[1]);
-    final muscleMap = {
-      for (final ex in results[2])
-        (ex['name'] as String? ?? '').trim().toLowerCase():
-            (ex['primary_muscle'] as String? ?? '').trim(),
-    };
-    return _ProgressData(report: report, muscleMap: muscleMap);
-  }
-
-  Future<List<Map<String, dynamic>>> _workouts() => BackendApi.getWorkouts();
-
-  Future<List<Map<String, dynamic>>> _templates() async {
-    try {
-      return await BackendApi.getTemplates();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _catalog() async {
-    try {
-      return await BackendApi.getExercises();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  List<ExerciseProgressAnalysis> _sorted(ProgressAnalysisReport report) {
-    return List<ExerciseProgressAnalysis>.from(report.allExercises)
-      ..sort((a, b) {
-        final p = _decisionPriority(a) - _decisionPriority(b);
-        if (p != 0) return p;
-        return a.exerciseName.compareTo(b.exerciseName);
-      });
-  }
-
-  List<ExerciseProgressAnalysis> _applyFilter(
-      ProgressAnalysisReport report, String query) {
-    final sorted = _sorted(report);
-    final afterFilter = switch (_activeFilter) {
-      _FilterTab.all => sorted,
-      _FilterTab.increase =>
-        sorted.where((a) => a.decision == ProgressDecision.increase).toList(),
-      _FilterTab.keep => sorted
-          .where((a) => a.decision == ProgressDecision.keep && !a.isStalled)
-          .toList(),
-      _FilterTab.attention => sorted
-          .where((a) =>
-              a.decision == ProgressDecision.decrease ||
-              a.decision == ProgressDecision.insufficientData ||
-              a.isStalled)
-          .toList(),
-    };
-    if (query.isEmpty) return afterFilter;
-    return afterFilter
-        .where((a) => a.exerciseName.toLowerCase().contains(query))
-        .toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _ProgressDataTab(
-      future: _future,
-      builder: (data) {
-        final stats = _computeStats(data.report);
-        return _RecommendationsTab(
+  Widget _buildTabs(_ProgressData data) {
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _RecommendationsTab(
           report: data.report,
-          stats: stats,
+          stats: _computeStats(data.report),
+          summaryFuture: _summaryFuture,
           searchController: _searchController,
           activeFilter: _activeFilter,
           onFilterChanged: (tab) => setState(() {
@@ -456,51 +340,15 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           }),
           onSearchChanged: () => setState(() {}),
           applyFilter: _applyFilter,
-          onRefresh: () async {
-            setState(() => _future = _load());
-            await _future;
-          },
-        );
-      },
-    );
-  }
-}
-
-// ── Progress data tab ─────────────────────────────────────────────────────────
-
-class _ProgressDataTab extends StatelessWidget {
-  const _ProgressDataTab({
-    required this.future,
-    required this.builder,
-  });
-
-  final Future<_ProgressData> future;
-  final Widget Function(_ProgressData data) builder;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<_ProgressData>(
-      future: future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                BackendApi.describeError(
-                  snapshot.error!,
-                  fallback: 'Не удалось загрузить прогресс.',
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          );
-        }
-        return builder(snapshot.data!);
-      },
+          onRefresh: refresh,
+        ),
+        MuscleVolumeView(
+          workouts: data.workouts,
+          catalog: data.catalog,
+          onRefresh: refresh,
+        ),
+        _RecordsTab(report: data.report, onRefresh: refresh),
+      ],
     );
   }
 }
@@ -554,8 +402,9 @@ class _StyledTabBar extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
         tabs: const [
-          Tab(text: 'Статистика'),
-          Tab(text: 'Рекомендации'),
+          Tab(text: 'Веса'),
+          Tab(text: 'Мышцы'),
+          Tab(text: 'Рекорды'),
         ],
       ),
     );
@@ -568,6 +417,7 @@ class _RecommendationsTab extends StatelessWidget {
   const _RecommendationsTab({
     required this.report,
     required this.stats,
+    required this.summaryFuture,
     required this.searchController,
     required this.activeFilter,
     required this.onFilterChanged,
@@ -578,6 +428,7 @@ class _RecommendationsTab extends StatelessWidget {
 
   final ProgressAnalysisReport report;
   final _ProgressStats stats;
+  final Future<String> summaryFuture;
   final TextEditingController searchController;
   final _FilterTab activeFilter;
   final ValueChanged<_FilterTab> onFilterChanged;
@@ -588,7 +439,7 @@ class _RecommendationsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final query = searchController.text.trim().toLowerCase();
+    final query = normalizeForSearch(searchController.text);
     final exercises = applyFilter(report, query);
 
     return RefreshIndicator(
@@ -600,6 +451,17 @@ class _RecommendationsTab extends StatelessWidget {
             _DistributionBar(stats: stats),
             const SizedBox(height: 10),
           ],
+          FutureBuilder<String>(
+            future: summaryFuture,
+            builder: (context, snapshot) {
+              final summary = snapshot.data ?? '';
+              if (summary.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _AiSummaryCard(summary: summary),
+              );
+            },
+          ),
           _CategoryFilter(
             active: activeFilter,
             stats: stats,
@@ -639,10 +501,66 @@ class _RecommendationsTab extends StatelessWidget {
   }
 }
 
-// ── Statistics tab ────────────────────────────────────────────────────────────
+// ── AI summary card ───────────────────────────────────────────────────────────
 
-class _StatisticsTab extends StatelessWidget {
-  const _StatisticsTab({
+class _AiSummaryCard extends StatelessWidget {
+  const _AiSummaryCard({required this.summary});
+  final String summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DashboardCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.auto_awesome_rounded,
+              size: 18,
+              color: scheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Коуч говорит',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  summary,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        height: 1.45,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Records tab ───────────────────────────────────────────────────────────────
+
+class _RecordsTab extends StatelessWidget {
+  const _RecordsTab({
     required this.report,
     required this.onRefresh,
   });
@@ -659,28 +577,20 @@ class _StatisticsTab extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
         children: [
-          if (records.isNotEmpty) ...[
-            const DashboardSectionLabel('Личные рекорды'),
-            const SizedBox(height: 10),
+          if (records.isEmpty)
+            DashboardCard(
+              child: Text(
+                report.allExercises.isEmpty
+                    ? 'Недостаточно истории для рекордов.'
+                    : 'Личных рекордов пока нет.',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            )
+          else
             ...records.map(
               (r) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _RecordCard(record: r),
-              ),
-            ),
-          ],
-          if (report.allExercises.isEmpty)
-            DashboardCard(
-              child: Text(
-                'Недостаточно истории для статистики.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          else if (records.isEmpty)
-            DashboardCard(
-              child: Text(
-                'Личных рекордов пока нет.',
-                style: Theme.of(context).textTheme.bodyLarge,
               ),
             ),
         ],

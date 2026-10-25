@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -91,14 +91,105 @@ def create_workout(
     return workout
 
 
+@router.get('/days', response_model=list[str])
+def list_workout_days(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all distinct dates (YYYY-MM-DD) that have at least one workout."""
+    stmt = (
+        select(func.date(Workout.started_at).label('day'))
+        .where(Workout.user_id == current_user.id)
+        .distinct()
+        .order_by(func.date(Workout.started_at).desc())
+    )
+    rows = db.execute(stmt).all()
+    return [str(row.day) for row in rows]
+
+
+@router.get('/last-exercise')
+def last_exercise(
+    name: str = Query(min_length=1, max_length=120),
+    catalog_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the most recent exercise entry (with all sets) matching name or catalog_id."""
+    normalized_name = _normalize_exercise_name(name)
+    stmt = (
+        select(WorkoutExercise.id)
+        .join(Workout, Workout.id == WorkoutExercise.workout_id)
+        .where(Workout.user_id == current_user.id)
+        .order_by(Workout.started_at.desc(), Workout.id.desc())
+        .limit(1)
+    )
+    if catalog_id is not None:
+        stmt = stmt.where(
+            (WorkoutExercise.catalog_exercise_id == catalog_id) |
+            (_normalized_exercise_name_expr() == normalized_name)
+        )
+    else:
+        stmt = stmt.where(_normalized_exercise_name_expr() == normalized_name)
+
+    exercise_id = db.scalar(stmt)
+    if exercise_id is None:
+        return None
+
+    exercise = db.scalar(
+        select(WorkoutExercise)
+        .where(WorkoutExercise.id == exercise_id)
+        .options(joinedload(WorkoutExercise.sets))
+    )
+    if exercise is None:
+        return None
+
+    return {
+        'exercise_name': exercise.exercise_name,
+        'catalog_exercise_id': exercise.catalog_exercise_id,
+        'sets': sorted(
+            [
+                {
+                    'position': s.position,
+                    'reps': s.reps,
+                    'weight': s.weight,
+                    'set_type': s.set_type,
+                    'rpe': s.rpe,
+                    'notes': s.notes,
+                }
+                for s in exercise.sets
+            ],
+            key=lambda s: s['position'],
+        ),
+    }
+
+
 @router.get('', response_model=list[WorkoutOut])
-def list_workouts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_workouts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+):
     stmt = (
         select(Workout)
         .where(Workout.user_id == current_user.id)
         .options(joinedload(Workout.exercises).joinedload(WorkoutExercise.sets))
         .order_by(Workout.started_at.desc())
+        .offset(offset)
     )
+    if from_date is not None:
+        stmt = stmt.where(
+            Workout.started_at >= datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
+        )
+    if to_date is not None:
+        next_day = to_date + timedelta(days=1)
+        stmt = stmt.where(
+            Workout.started_at < datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc)
+        )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return list(db.scalars(stmt).unique())
 
 

@@ -11,6 +11,7 @@ import '../../../core/network/backend_api.dart';
 import '../../../core/storage/local_cache.dart';
 import '../../heatmap/data/muscle_heatmap_asset_loader.dart';
 import '../../heatmap/domain/muscle_heatmap_models.dart';
+import '../../heatmap/domain/muscle_heatmap_color_resolver.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/body_svg_colorizer.dart';
 import '../presentation/workout_share_card.dart';
@@ -35,13 +36,11 @@ class WorkoutShareService {
     final assetData = results[0] as MuscleHeatmapAssetData;
     final userInfo = results[1] as ShareUserInfo?;
 
-    final calc = const MuscleLoadCalculator();
-    final rawLoads = calc.calculateForWorkout(
+    final loads = const MuscleLoadCalculator().calculateForWorkout(
       workout: workout,
       exerciseCatalog: exerciseCatalog,
     );
-    final normalizedLoads = calc.normalizer.normalize(rawLoads);
-    final coloredSvg = _buildColoredSvg(assetData, normalizedLoads);
+    final coloredSvg = _buildColoredSvg(assetData, loads);
 
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
@@ -113,11 +112,12 @@ class WorkoutShareService {
 
   static String _buildColoredSvg(
     MuscleHeatmapAssetData assetData,
-    Map<String, double> normalizedLoads,
+    Map<String, double> loads,
   ) =>
       const BodySvgColorizer().colorizeFromLoads(
         assetData: assetData,
-        normalizedLoads: normalizedLoads,
+        loads: loads,
+        scale: MuscleHeatmapScale.session,
       );
 
   // ── PNG capture ──────────────────────────────────────────────────────

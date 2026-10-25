@@ -7,6 +7,8 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../coach/presentation/ai_coach_screen.dart';
+import '../../heatmap/data/heatmap_reference_workouts.dart';
+import '../../heatmap/domain/muscle_heatmap_color_resolver.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
 import '../../progression/application/progression_controller.dart';
@@ -58,7 +60,6 @@ class CalendarScreenState extends State<CalendarScreen> {
     'декабря',
   ];
 
-  late Future<List<Map<String, dynamic>>> _future;
   late Future<List<Map<String, dynamic>>> _catalogFuture;
   late DateTime _displayedMonth;
   late DateTime _selectedDay;
@@ -66,29 +67,61 @@ class CalendarScreenState extends State<CalendarScreen> {
   final WorkoutExportService _workoutExportService =
       const WorkoutExportService();
 
+  // All dates with workouts (for calendar dots across full history).
+  Set<DateTime> _workoutDays = {};
+
+  // Full workout data cached per displayed month ("YYYY-MM" → list).
+  final Map<String, List<Map<String, dynamic>>> _monthCache = {};
+  final Set<String> _monthsLoading = {};
+
+  String _monthKey(DateTime month) =>
+      '${month.year}-${month.month.toString().padLeft(2, '0')}';
+
+  List<Map<String, dynamic>> get _displayedMonthWorkouts =>
+      _monthCache[_monthKey(_displayedMonth)] ?? const [];
+
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _displayedMonth = DateTime(now.year, now.month);
     _selectedDay = DateUtils.dateOnly(now);
-    _future = _loadWorkouts();
     _catalogFuture = _loadExerciseCatalog();
+    unawaited(_loadAllDays());
+    unawaited(_loadMonth(_displayedMonth));
     unawaited(_syncDisplayedMonthWellness());
   }
 
-  Future<List<Map<String, dynamic>>> _loadWorkouts() async {
+  Future<void> _loadAllDays() async {
     try {
-      return await BackendApi.getWorkouts();
-    } catch (_) {
-      final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
-      if (cached != null) {
-        return cached
-            .cast<Map>()
-            .map((e) => e.cast<String, dynamic>())
-            .toList();
+      final days = await BackendApi.getWorkoutDays();
+      if (mounted) {
+        setState(() {
+          _workoutDays = days
+              .map((d) => DateUtils.dateOnly(DateTime.parse(d)))
+              .toSet();
+        });
       }
-      rethrow;
+    } catch (_) {}
+  }
+
+  Future<void> _loadMonth(DateTime month) async {
+    final key = _monthKey(month);
+    if (_monthCache.containsKey(key) || _monthsLoading.contains(key)) return;
+    _monthsLoading.add(key);
+    if (mounted) setState(() {});
+    try {
+      final from = DateTime(month.year, month.month, 1);
+      final to = DateTime(month.year, month.month + 1, 0);
+      final workouts = await BackendApi.getWorkoutsInRange(from: from, to: to);
+      if (mounted) {
+        setState(() {
+          _monthCache[key] = workouts;
+          _monthsLoading.remove(key);
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _monthsLoading.remove(key));
     }
   }
 
@@ -99,10 +132,16 @@ class CalendarScreenState extends State<CalendarScreen> {
 
   Future<void> _refresh() async {
     setState(() {
-      _future = _loadWorkouts();
+      _workoutDays = {};
+      _monthCache.clear();
+      _monthsLoading.clear();
       _catalogFuture = _loadExerciseCatalog();
     });
-    await Future.wait([_future, _catalogFuture, _syncDisplayedMonthWellness()]);
+    await Future.wait([
+      _loadAllDays(),
+      _loadMonth(_displayedMonth),
+      _syncDisplayedMonthWellness(),
+    ]);
   }
 
   Future<List<Map<String, dynamic>>> _loadExerciseCatalog() async {
@@ -236,11 +275,9 @@ class CalendarScreenState extends State<CalendarScreen> {
 
       if (selectedTemplate == null || !mounted) return;
 
-      final workouts = await _future;
-      if (!mounted) return;
-
       final initialExercises =
-          _buildExercisesFromTemplate(selectedTemplate, workouts);
+          await _buildExercisesFromTemplateAsync(selectedTemplate);
+      if (!mounted) return;
 
       final changed = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
@@ -361,25 +398,34 @@ class CalendarScreenState extends State<CalendarScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _buildExercisesFromTemplate(
+  Future<List<Map<String, dynamic>>> _buildExercisesFromTemplateAsync(
     Map<String, dynamic> template,
-    List<Map<String, dynamic>> workouts,
-  ) {
+  ) async {
     final templateExercises =
         (template['exercises'] as List?)?.cast<dynamic>() ?? const [];
-    final prepared = <Map<String, dynamic>>[];
 
-    for (var index = 0; index < templateExercises.length; index++) {
-      final templateExercise =
-          (templateExercises[index] as Map).cast<String, dynamic>();
-      final lastExercise = _findLatestExercise(workouts, templateExercise);
+    final lastExercises = await Future.wait(
+      templateExercises.map((te) async {
+        final map = (te as Map).cast<String, dynamic>();
+        try {
+          return await BackendApi.getLastExercise(
+            name: (map['exercise_name'] ?? '').toString(),
+            catalogId: map['catalog_exercise_id'] as int?,
+          );
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    return List.generate(templateExercises.length, (i) {
+      final te = (templateExercises[i] as Map).cast<String, dynamic>();
       final lastSets =
-          (lastExercise?['sets'] as List?)?.cast<dynamic>() ?? const [];
-
-      prepared.add({
-        'catalog_exercise_id': templateExercise['catalog_exercise_id'],
-        'exercise_name': (templateExercise['exercise_name'] ?? '').toString(),
-        'position': index + 1,
+          (lastExercises[i]?['sets'] as List?)?.cast<dynamic>() ?? const [];
+      return {
+        'catalog_exercise_id': te['catalog_exercise_id'],
+        'exercise_name': (te['exercise_name'] ?? '').toString(),
+        'position': i + 1,
         'notes': null,
         'sets': lastSets.isEmpty
             ? [
@@ -392,10 +438,10 @@ class CalendarScreenState extends State<CalendarScreen> {
                   'notes': null,
                 },
               ]
-            : List.generate(lastSets.length, (setIndex) {
-                final set = (lastSets[setIndex] as Map).cast<String, dynamic>();
+            : List.generate(lastSets.length, (j) {
+                final set = (lastSets[j] as Map).cast<String, dynamic>();
                 return {
-                  'position': setIndex + 1,
+                  'position': j + 1,
                   'reps': set['reps'] ?? '',
                   'weight': set['weight'],
                   'set_type': (set['set_type'] ?? 'work').toString(),
@@ -403,41 +449,8 @@ class CalendarScreenState extends State<CalendarScreen> {
                   'notes': null,
                 };
               }),
-      });
-    }
-
-    return prepared;
-  }
-
-  Map<String, dynamic>? _findLatestExercise(
-    List<Map<String, dynamic>> workouts,
-    Map<String, dynamic> templateExercise,
-  ) {
-    final templateCatalogId = templateExercise['catalog_exercise_id'];
-    final templateName = (templateExercise['exercise_name'] ?? '').toString();
-
-    final sorted = [...workouts]..sort((a, b) {
-        final aDate = _parseWorkoutDay(a) ?? DateTime(1970);
-        final bDate = _parseWorkoutDay(b) ?? DateTime(1970);
-        return bDate.compareTo(aDate);
-      });
-
-    for (final workout in sorted) {
-      final exercises =
-          (workout['exercises'] as List?)?.cast<dynamic>() ?? const [];
-      for (final exercise in exercises) {
-        final map = (exercise as Map).cast<String, dynamic>();
-        if (templateCatalogId != null &&
-            map['catalog_exercise_id'] == templateCatalogId) {
-          return map;
-        }
-        if ((map['exercise_name'] ?? '').toString() == templateName) {
-          return map;
-        }
-      }
-    }
-
-    return null;
+      };
+    });
   }
 
   Future<void> _shareWorkout(
@@ -601,8 +614,8 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  Future<void> _exportWorkoutRange(List<Map<String, dynamic>> workouts) async {
-    if (workouts.isEmpty) {
+  Future<void> _exportWorkoutRange() async {
+    if (_workoutDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Нет тренировок для экспорта.')),
       );
@@ -610,14 +623,9 @@ class CalendarScreenState extends State<CalendarScreen> {
     }
 
     final today = DateUtils.dateOnly(DateTime.now());
-    DateTime? firstWorkoutDate;
-    for (final w in workouts) {
-      final d = _parseWorkoutDay(w);
-      if (d != null &&
-          (firstWorkoutDate == null || d.isBefore(firstWorkoutDate))) {
-        firstWorkoutDate = d;
-      }
-    }
+    final firstWorkoutDate = _workoutDays.isEmpty
+        ? null
+        : _workoutDays.reduce((a, b) => a.isBefore(b) ? a : b);
 
     DateTimeRange? pickedRange =
         await _showExportPresets(today, firstWorkoutDate);
@@ -638,11 +646,27 @@ class CalendarScreenState extends State<CalendarScreen> {
       if (!mounted || pickedRange == null) return;
     }
 
-    final selectedWorkouts = _workoutExportService.filterWorkoutsByDateRange(
-      workouts: workouts,
-      from: pickedRange.start,
-      to: pickedRange.end,
-    );
+    List<Map<String, dynamic>> selectedWorkouts;
+    try {
+      selectedWorkouts = await BackendApi.getWorkoutsInRange(
+        from: pickedRange.start,
+        to: pickedRange.end,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            BackendApi.describeError(
+              e,
+              fallback: 'Не удалось загрузить тренировки для экспорта.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
     if (selectedWorkouts.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -696,12 +720,11 @@ class CalendarScreenState extends State<CalendarScreen> {
       return d != null && !d.isBefore(weekStart) && !d.isAfter(weekEnd);
     }).toList();
 
-    final calculator = const MuscleLoadCalculator();
-    final rawLoads = calculator.calculateForWorkouts(
+    final loads = const MuscleLoadCalculator().calculate(
       workouts: weekWorkouts,
       exerciseCatalog: exerciseCatalog,
+      referenceWorkouts: [...cachedHeatmapReferenceWorkouts(), ...allWorkouts],
     );
-    final normalizedLoads = calculator.normalizer.normalize(rawLoads);
 
     final weekLabel =
         '${weekStart.day}–${weekEnd.day} ${_monthGenitive[weekStart.month - 1]}';
@@ -734,12 +757,12 @@ class CalendarScreenState extends State<CalendarScreen> {
               ),
               const SizedBox(height: 12),
               MuscleHeatmapCard(
-                title: '',
-                subtitle: '',
-                rawLoads: rawLoads,
-                normalizedLoads: normalizedLoads,
+                loads: loads,
+                scale: MuscleHeatmapScale.week,
                 showCard: false,
                 showHeader: false,
+                showMuscleList: true,
+                emptyMessage: 'За эту неделю нет рабочих подходов.',
               ),
             ],
           ),
@@ -808,6 +831,7 @@ class CalendarScreenState extends State<CalendarScreen> {
       _displayedMonth =
           DateTime(_displayedMonth.year, _displayedMonth.month + delta);
     });
+    unawaited(_loadMonth(_displayedMonth));
     unawaited(_syncDisplayedMonthWellness());
   }
 
@@ -851,17 +875,6 @@ class CalendarScreenState extends State<CalendarScreen> {
     return byDay;
   }
 
-  int _workoutsInDisplayedMonth(
-      Map<DateTime, List<Map<String, dynamic>>> byDay) {
-    return byDay.entries
-        .where(
-          (entry) =>
-              entry.key.year == _displayedMonth.year &&
-              entry.key.month == _displayedMonth.month,
-        )
-        .fold(0, (sum, entry) => sum + entry.value.length);
-  }
-
   List<Widget> _buildWeekRows(
     Map<DateTime, List<Map<String, dynamic>>> byDay,
     double cellHeight,
@@ -888,7 +901,8 @@ class CalendarScreenState extends State<CalendarScreen> {
     for (var day = 1; day <= daysInMonth; day++) {
       final date = DateTime(_displayedMonth.year, _displayedMonth.month, day);
       final dayWorkouts = byDay[date] ?? const <Map<String, dynamic>>[];
-      final hasWorkouts = dayWorkouts.isNotEmpty;
+      final hasWorkouts =
+          dayWorkouts.isNotEmpty || _workoutDays.contains(date);
       final wellnessZone = wellnessZones[date];
       final isSelected = DateUtils.isSameDay(date, _selectedDay);
       final isToday = DateUtils.isSameDay(date, DateTime.now());
@@ -1056,16 +1070,14 @@ class CalendarScreenState extends State<CalendarScreen> {
       return const SizedBox.shrink();
     }
 
-    final calculator = const MuscleLoadCalculator();
-    final rawLoads = calculator.calculateForWorkout(
+    final loads = const MuscleLoadCalculator().calculateForWorkout(
       workout: workout,
       exerciseCatalog: exerciseCatalog,
+      referenceWorkouts: cachedHeatmapReferenceWorkouts(),
     );
-    final normalizedLoads = calculator.normalizer.normalize(rawLoads);
 
     return WorkoutHeatmapPreview(
-      rawLoads: rawLoads,
-      normalizedLoads: normalizedLoads,
+      loads: loads,
       emptyMessage: 'Нет данных',
       width: width,
     );
@@ -1080,31 +1092,21 @@ class CalendarScreenState extends State<CalendarScreen> {
     final compactCalendar = screenWidth < 420;
     final cellHeight = compactCalendar ? 36.0 : _calendarCellHeight;
 
+    final workouts = _displayedMonthWorkouts;
+    final byDay = _groupByDay(workouts);
+    final selectedDayWorkouts =
+        byDay[_selectedDay] ?? const <Map<String, dynamic>>[];
+    final monthCount = workouts.length;
+    final isMonthLoading =
+        _monthsLoading.contains(_monthKey(_displayedMonth));
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: AppBackdrop(
         child: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Text(
-                  BackendApi.describeError(
-                    snapshot.error!,
-                    fallback: 'Не удалось загрузить тренировки.',
-                  ),
-                ),
-              );
-            }
-
-            final workouts = snapshot.data ?? [];
-            final byDay = _groupByDay(workouts);
-            final selectedDayWorkouts =
-                byDay[_selectedDay] ?? const <Map<String, dynamic>>[];
-            final monthCount = _workoutsInDisplayedMonth(byDay);
+          future: _catalogFuture,
+          builder: (context, catalogSnapshot) {
+            final exerciseCatalog = catalogSnapshot.data ?? const [];
 
             final daysInMonth =
                 DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0)
@@ -1120,11 +1122,7 @@ class CalendarScreenState extends State<CalendarScreen> {
             final selectedDayWellness =
                 WellnessRepository.loadForDate(_selectedDay);
 
-            return FutureBuilder<List<Map<String, dynamic>>>(
-              future: _catalogFuture,
-              builder: (context, catalogSnapshot) {
-                final exerciseCatalog = catalogSnapshot.data ?? const [];
-                return RefreshIndicator(
+            return RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 96),
@@ -1133,6 +1131,15 @@ class CalendarScreenState extends State<CalendarScreen> {
                         title: 'Календарь',
                         subtitle: '$monthLabel · ${_selectedDayLabel()}',
                         actions: [
+                          if (isMonthLoading)
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: scheme.primary,
+                              ),
+                            ),
                           HeaderMetricChip(
                             value: '$monthCount',
                             label: 'за месяц',
@@ -1590,7 +1597,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                             ),
                             const SizedBox(width: 8),
                             IconButton.outlined(
-                              onPressed: () => _exportWorkoutRange(workouts),
+                              onPressed: () => _exportWorkoutRange(),
                               tooltip: 'Экспорт диапазона',
                               icon: const Icon(
                                   Icons.download_for_offline_outlined),
@@ -1626,7 +1633,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                                 Expanded(
                                   child: OutlinedButton.icon(
                                     onPressed: () =>
-                                        _exportWorkoutRange(workouts),
+                                        _exportWorkoutRange(),
                                     icon: const Icon(
                                         Icons.download_for_offline_outlined,
                                         size: 18),
@@ -1640,8 +1647,6 @@ class CalendarScreenState extends State<CalendarScreen> {
                     ],
                   ),
                 );
-              },
-            );
           },
         ),
       ),
