@@ -22,6 +22,9 @@ class ProgressionProfileData {
     required this.currentMonth,
     required this.recentAchievements,
     this.achievementCatalog = const [],
+    this.weeklyQuests = const [],
+    this.weeklyQuestBonusXp = 0,
+    this.muscleLevels = const [],
     required this.recentRecords,
     required this.allExerciseRecords,
     required this.recentRewards,
@@ -52,6 +55,13 @@ class ProgressionProfileData {
 
   /// Все достижения, включая ещё не полученные, с прогрессом к цели.
   final List<AchievementCatalogItem> achievementCatalog;
+
+  /// Задания текущей недели и бонус XP за выполнение всех.
+  final List<WeeklyQuest> weeklyQuests;
+  final int weeklyQuestBonusXp;
+
+  /// Уровни мышц по эффективным подходам за всё время.
+  final List<MuscleLevel> muscleLevels;
   final List<RecordData> recentRecords;
   final List<ExerciseRecordData> allExerciseRecords;
   final List<RewardData> recentRewards;
@@ -99,6 +109,15 @@ class ProgressionProfileData {
           .cast<Map>()
           .map((item) =>
               AchievementCatalogItem.fromJson(item.cast<String, dynamic>()))
+          .toList(),
+      weeklyQuests: ((json['weeklyQuests'] as List?) ?? const [])
+          .cast<Map>()
+          .map((item) => WeeklyQuest.fromJson(item.cast<String, dynamic>()))
+          .toList(),
+      weeklyQuestBonusXp: (json['weeklyQuestBonusXp'] as num?)?.toInt() ?? 0,
+      muscleLevels: ((json['muscleLevels'] as List?) ?? const [])
+          .cast<Map>()
+          .map((item) => MuscleLevel.fromJson(item.cast<String, dynamic>()))
           .toList(),
       recentRecords: ((json['recentRecords'] as List?) ?? const [])
           .cast<Map>()
@@ -239,6 +258,67 @@ class AchievementCatalogItem {
       target: (json['target'] as num?)?.toInt() ?? 1,
     );
   }
+}
+
+class WeeklyQuest {
+  const WeeklyQuest({
+    required this.code,
+    required this.title,
+    required this.description,
+    required this.progress,
+    required this.target,
+    required this.completed,
+    required this.xp,
+  });
+
+  final String code;
+  final String title;
+  final String description;
+  final int progress;
+  final int target;
+  final bool completed;
+  final int xp;
+
+  double get ratio => target <= 0 ? 0 : (progress / target).clamp(0, 1);
+
+  factory WeeklyQuest.fromJson(Map<String, dynamic> json) => WeeklyQuest(
+        code: (json['code'] ?? '').toString(),
+        title: (json['title'] ?? '').toString(),
+        description: (json['description'] ?? '').toString(),
+        progress: (json['progress'] as num?)?.toInt() ?? 0,
+        target: (json['target'] as num?)?.toInt() ?? 1,
+        completed: json['completed'] == true,
+        xp: (json['xp'] as num?)?.toInt() ?? 0,
+      );
+}
+
+class MuscleLevel {
+  const MuscleLevel({
+    required this.muscle,
+    required this.sets,
+    required this.level,
+    required this.levelStartSets,
+    required this.nextLevelSets,
+  });
+
+  final String muscle;
+  final int sets;
+  final int level;
+  final int levelStartSets;
+  final int nextLevelSets;
+
+  double get levelProgress {
+    final span = nextLevelSets - levelStartSets;
+    return span <= 0 ? 0 : ((sets - levelStartSets) / span).clamp(0, 1);
+  }
+
+  factory MuscleLevel.fromJson(Map<String, dynamic> json) => MuscleLevel(
+        muscle: (json['muscle'] ?? '').toString(),
+        sets: (json['sets'] as num?)?.toInt() ?? 0,
+        level: (json['level'] as num?)?.toInt() ?? 0,
+        levelStartSets: (json['levelStartSets'] as num?)?.toInt() ?? 0,
+        nextLevelSets: (json['nextLevelSets'] as num?)?.toInt() ?? 10,
+      );
 }
 
 class RecordData {

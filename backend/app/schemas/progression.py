@@ -65,6 +65,24 @@ class AchievementCatalogItemOut(BaseModel):
     target: int
 
 
+class WeeklyQuestOut(BaseModel):
+    code: str
+    title: str
+    description: str
+    progress: int
+    target: int
+    completed: bool
+    xp: int
+
+
+class MuscleLevelOut(BaseModel):
+    muscle: str
+    sets: int
+    level: int
+    levelStartSets: int
+    nextLevelSets: int
+
+
 class ProgressRecordOut(BaseModel):
     exerciseName: str
     recordType: str
@@ -113,6 +131,9 @@ class ProgressionProfileResponse(BaseModel):
     currentMonth: MonthProgressSummary
     recentAchievements: list[ProgressAchievementOut]
     achievementCatalog: list[AchievementCatalogItemOut] = []
+    weeklyQuests: list[WeeklyQuestOut] = []
+    weeklyQuestBonusXp: int = 0
+    muscleLevels: list[MuscleLevelOut] = []
     recentRecords: list[ProgressRecordOut]
     allExerciseRecords: list[ExerciseRecordOut]
     recentRewards: list[ProgressRewardOut]

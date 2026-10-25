@@ -16,6 +16,7 @@ import '../../wellness/data/wellness_repository.dart';
 import '../../wellness/domain/wellness_entry.dart';
 import '../../wellness/presentation/wellness_widgets.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
+import '../../progression/presentation/gamification_widgets.dart';
 
 class TodayScreen extends StatefulWidget {
   const TodayScreen({super.key});
@@ -1487,9 +1488,18 @@ class _NextGoalCard extends StatelessWidget {
     return ListenableBuilder(
       listenable: ProgressionController.instance,
       builder: (context, _) {
-        final catalog =
-            ProgressionController.instance.profile?.achievementCatalog ??
-                const [];
+        final profile = ProgressionController.instance.profile;
+        // Задания недели важнее одиночной цели: если они есть — показываем их.
+        if (profile != null && profile.weeklyQuests.isNotEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: WeeklyQuestsCard(
+              quests: profile.weeklyQuests,
+              bonusXp: profile.weeklyQuestBonusXp,
+            ),
+          );
+        }
+        final catalog = profile?.achievementCatalog ?? const [];
         final candidates = catalog
             .where((a) => !a.unlocked && a.target > 1 && a.progress > 0)
             .toList()

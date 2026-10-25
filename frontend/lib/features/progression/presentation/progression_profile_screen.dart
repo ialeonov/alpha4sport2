@@ -9,6 +9,7 @@ import '../../../core/widgets/user_avatar.dart';
 import '../application/progression_controller.dart';
 import '../domain/progression_models.dart';
 import 'achievements_section.dart';
+import 'gamification_widgets.dart';
 
 class ProgressionProfileScreen extends StatelessWidget {
   const ProgressionProfileScreen({super.key});
@@ -282,6 +283,17 @@ class _ProgressionProfileContentState
                 // ── Рекорды ─────────────────────────────────────────────
                 _RecordsCard(records: profile.allExerciseRecords),
                 const SizedBox(height: 12),
+
+                // ── Уровни мышц ─────────────────────────────────────────
+                if (profile.muscleLevels.isNotEmpty) ...[
+                  _SectionCard(
+                    title: 'Уровни мышц',
+                    icon: Icons.fitness_center_rounded,
+                    iconColor: Theme.of(context).colorScheme.primary,
+                    child: MuscleLevelsGrid(levels: profile.muscleLevels),
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
                 // ── Достижения ──────────────────────────────────────────
                 _SectionCard(

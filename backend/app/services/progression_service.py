@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.progression import (
     ProgressAchievement,
@@ -15,12 +15,15 @@ from app.models.progression import (
     UserProgression,
 )
 from app.models.user import User
-from app.models.workout import ExerciseSet, Workout, WorkoutExercise
+from app.models.user_profile import UserProfile
+from app.models.workout import ExerciseCatalog, ExerciseSet, Workout, WorkoutExercise
 from app.services.account_event_service import (
     AccountEventService,
     avatar_url_for_user,
     display_name_for_user,
 )
+from app.services import gamification
+from app.services.muscle_load import MuscleLoadCalculator
 from app.services.progression_math import (
     end_of_week,
     estimate_one_rep_max,
@@ -180,10 +183,22 @@ class ProgressionService:
         if status_changed:
             self.db.commit()
 
+        catalog = list(
+            self.db.scalars(
+                select(ExerciseCatalog)
+                .where(ExerciseCatalog.user_id == user_id)
+                .options(selectinload(ExerciseCatalog.secondary_muscle_links))
+            )
+        )
+        profile = self.db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+        weekly_target = (profile.days_per_week if profile and profile.days_per_week else 3)
+
         result = _ProgressionCalculator(
             user=user,
             workouts=workouts,
             sick_leaves=sick_leaves,
+            catalog=catalog,
+            weekly_target=max(2, min(weekly_target, 6)),
         ).build()
 
         progression = self.db.get(UserProgression, user_id)
@@ -424,10 +439,16 @@ class _ProgressionCalculator:
         user: User,
         workouts: list[Workout],
         sick_leaves: list[SickLeave],
+        catalog: list[ExerciseCatalog] | None = None,
+        weekly_target: int = 3,
     ):
         self.user = user
         self.workouts = workouts
         self.sick_leaves = sick_leaves
+        self.load_calculator = MuscleLoadCalculator(catalog or [])
+        self.weekly_target = weekly_target
+        self.total_tonnage = 0.0
+        self.valid_workouts: list[Workout] = []
         self.reward_events: dict[str, RewardEventData] = {}
         self.achievements: dict[str, AchievementData] = {}
         self.record_events: list[RecordEventData] = []
@@ -492,8 +513,9 @@ class _ProgressionCalculator:
                 )
                 self._achievement_once(code='first_workout', achieved_at=performed_at)
 
-            if self.total_completed_workouts == 100:
-                self._achievement_once(code='hundred_workouts', achieved_at=performed_at)
+            for count, code in _WORKOUT_TIERS:
+                if self.total_completed_workouts == count:
+                    self._achievement_once(code=code, achieved_at=performed_at)
 
             if self.total_completed_workouts in (10, 25, 50):
                 self._reward_once(
@@ -539,13 +561,24 @@ class _ProgressionCalculator:
                 self._achievement_once(code='return_after_sick_leave', achieved_at=performed_at)
 
             self.total_pr_count += self._register_prs(workout, performed_at)
+            self.valid_workouts.append(workout)
+            before_tonnage = self.total_tonnage
+            self.total_tonnage += sum(
+                float(s.weight or 0) * s.reps
+                for e in workout.exercises
+                for s in e.sets
+                if _is_working_set(s)
+            )
+            for tons, code in _TONNAGE_TIERS:
+                if before_tonnage < tons * 1000 <= self.total_tonnage:
+                    self._achievement_once(code=code, achieved_at=performed_at)
             last_valid_day = performed_day
 
         if self.record_events:
             self._achievement_once(code='first_pr', achieved_at=self.record_events[0].achieved_at)
         if len(self.record_events) >= 5:
             self._achievement_once(code='five_prs', achieved_at=self.record_events[4].achieved_at)
-        for count, code in ((10, 'ten_prs'), (25, 'twenty_five_prs'), (50, 'fifty_prs')):
+        for count, code in _PR_TIERS:
             if len(self.record_events) >= count:
                 self._achievement_once(
                     code=code, achieved_at=self.record_events[count - 1].achieved_at,
@@ -558,6 +591,8 @@ class _ProgressionCalculator:
 
         current_streak, best_streak = self._calculate_streaks(weekly, today)
         self._award_long_term_achievements(weekly, today)
+        self._award_strength_clubs()
+        current_quests = self._award_weekly_quests(today)
         total_xp = sum(item.xp_awarded for item in self.reward_events.values())
         level = get_level_by_xp(total_xp)
         level_start_xp = get_level_start_xp(level)
@@ -594,6 +629,11 @@ class _ProgressionCalculator:
                 'idealWeeksCount': sum(1 for item in weekly if item['isIdeal']),
                 'idealMonthsCount': sum(1 for item in monthly if item['isIdeal']),
             },
+            'weeklyQuests': [quest.to_dict() for quest in current_quests],
+            'weeklyQuestBonusXp': gamification.QUEST_ALL_BONUS_XP,
+            'muscleLevels': gamification.build_muscle_levels(
+                self.valid_workouts, self.load_calculator,
+            ),
             'achievementCatalog': self._build_achievement_catalog(
                 best_streak=best_streak,
                 ideal_weeks=sum(1 for item in weekly if item['isIdeal']),
@@ -906,6 +946,98 @@ class _ProgressionCalculator:
                 if ideal >= 10:
                     self._achievement_once(code='ten_ideal_weeks', achieved_at=achieved_at)
 
+    def _award_weekly_quests(self, today: date) -> list:
+        """Задания недели: XP за каждое выполненное и бонус за все три.
+        Возвращает задания текущей недели для экрана."""
+        current: list = []
+        for week_start in gamification.quest_weeks(today):
+            week_end = week_start + timedelta(days=6)
+            records = sum(
+                1
+                for r in self.record_events
+                if r.record_type in ('weight', 'volume')
+                and week_start <= r.achieved_at.date() <= week_end
+            )
+            quests = gamification.build_week_quests(
+                week_start=week_start,
+                workouts=self.valid_workouts,
+                calculator=self.load_calculator,
+                record_count=records,
+                weekly_target=self.weekly_target,
+            )
+            moment = gamification.week_end_moment(week_start, today)
+            key = week_key(week_start)
+            for quest in quests:
+                if quest.completed:
+                    self._reward_once(
+                        event_key=f'quest:{key}:{quest.code}',
+                        event_type='weekly_quest',
+                        xp_awarded=gamification.QUEST_XP,
+                        created_at=moment,
+                        metadata={'weekKey': key, 'quest': quest.title},
+                    )
+            if quests and all(q.completed for q in quests):
+                self._reward_once(
+                    event_key=f'quest:{key}:all',
+                    event_type='weekly_quest_bonus',
+                    xp_awarded=gamification.QUEST_ALL_BONUS_XP,
+                    created_at=moment,
+                    metadata={'weekKey': key},
+                )
+                self._achievement_once(code='quest_week_all', achieved_at=moment)
+            current = quests
+        return current
+
+    def _award_strength_clubs(self) -> None:
+        """Клубы по основным упражнениям: 100 кг в жиме и т. п. Дата — первый
+        рекорд веса, который перешагнул порог."""
+        for record in sorted(self.record_events, key=lambda r: r.achieved_at):
+            if record.record_type != 'weight':
+                continue
+            club = gamification.club_for(record.exercise_name)
+            if club is None:
+                continue
+            for threshold in club.thresholds:
+                if record.value >= threshold:
+                    self._achievement_once(
+                        code=gamification.club_code(club, threshold),
+                        achieved_at=record.achieved_at,
+                    )
+
+    def _club_catalog(self) -> list[dict]:
+        """Клубы для каталога: полученные и следующий порог по каждому
+        упражнению, которое пользователь делает."""
+        best = gamification.best_lift_by_club(self.exercise_records)
+        items = []
+        for club in gamification.CLUBS:
+            if club.key not in best:
+                continue
+            for threshold in club.thresholds:
+                code = gamification.club_code(club, threshold)
+                achieved = self.achievements.get(code)
+                if achieved is None and best[club.key] < threshold:
+                    items.append({
+                        'code': code,
+                        'title': gamification.club_title(code),
+                        'description': f'{club.title}: рабочий вес {threshold} кг',
+                        'unlocked': False,
+                        'achievedAt': None,
+                        'progress': int(best[club.key]),
+                        'target': threshold,
+                    })
+                    break
+                if achieved is not None:
+                    items.append({
+                        'code': code,
+                        'title': gamification.club_title(code),
+                        'description': f'{club.title}: рабочий вес {threshold} кг',
+                        'unlocked': True,
+                        'achievedAt': achieved.achieved_at.isoformat(),
+                        'progress': threshold,
+                        'target': threshold,
+                    })
+        return items
+
     def _build_achievement_catalog(self, *, best_streak: int, ideal_weeks: int) -> list[dict]:
         """Все достижения — полученные и будущие — с прогрессом к цели."""
         progress_by_code = {
@@ -923,6 +1055,15 @@ class _ProgressionCalculator:
             'streak_8_weeks': (best_streak, 8),
             'streak_12_weeks': (best_streak, 12),
             'ten_ideal_weeks': (ideal_weeks, 10),
+            'two_fifty_workouts': (self.total_completed_workouts, 250),
+            'five_hundred_workouts': (self.total_completed_workouts, 500),
+            'hundred_prs': (len(self.record_events), 100),
+            'two_fifty_prs': (len(self.record_events), 250),
+            'streak_26_weeks': (best_streak, 26),
+            'streak_52_weeks': (best_streak, 52),
+            'tonnage_100t': (int(self.total_tonnage / 1000), 100),
+            'tonnage_500t': (int(self.total_tonnage / 1000), 500),
+            'tonnage_1000t': (int(self.total_tonnage / 1000), 1000),
         }
         catalog = []
         for code in _ACHIEVEMENT_ORDER:
@@ -937,7 +1078,7 @@ class _ProgressionCalculator:
                 'progress': min(current, target),
                 'target': target,
             })
-        return catalog
+        return catalog + self._club_catalog()
 
     def _reward_once(
         self,
@@ -1150,7 +1291,22 @@ def _serialize_sick_leave(item: SickLeave | None) -> dict | None:
     }
 
 
-_STREAK_ACHIEVEMENTS = ((4, 'streak_4_weeks'), (8, 'streak_8_weeks'), (12, 'streak_12_weeks'))
+_STREAK_ACHIEVEMENTS = (
+    (4, 'streak_4_weeks'),
+    (8, 'streak_8_weeks'),
+    (12, 'streak_12_weeks'),
+    (26, 'streak_26_weeks'),
+    (52, 'streak_52_weeks'),
+)
+_WORKOUT_TIERS = ((100, 'hundred_workouts'), (250, 'two_fifty_workouts'), (500, 'five_hundred_workouts'))
+_PR_TIERS = (
+    (10, 'ten_prs'),
+    (25, 'twenty_five_prs'),
+    (50, 'fifty_prs'),
+    (100, 'hundred_prs'),
+    (250, 'two_fifty_prs'),
+)
+_TONNAGE_TIERS = ((100, 'tonnage_100t'), (500, 'tonnage_500t'), (1000, 'tonnage_1000t'))
 
 _ACHIEVEMENT_ORDER = (
     'first_workout',
@@ -1158,18 +1314,28 @@ _ACHIEVEMENT_ORDER = (
     'twenty_five_workouts',
     'fifty_workouts',
     'hundred_workouts',
+    'two_fifty_workouts',
+    'five_hundred_workouts',
     'good_week',
     'ideal_week',
     'streak_4_weeks',
     'streak_8_weeks',
     'streak_12_weeks',
+    'streak_26_weeks',
+    'streak_52_weeks',
     'ten_ideal_weeks',
+    'quest_week_all',
     'first_perfect_month',
     'first_pr',
     'five_prs',
     'ten_prs',
     'twenty_five_prs',
     'fifty_prs',
+    'hundred_prs',
+    'two_fifty_prs',
+    'tonnage_100t',
+    'tonnage_500t',
+    'tonnage_1000t',
     'high_volume_session',
     'comeback_after_break',
     'return_after_sick_leave',
@@ -1193,6 +1359,16 @@ _ACHIEVEMENT_DESCRIPTIONS = {
     'ten_prs': '10 личных рекордов',
     'twenty_five_prs': '25 личных рекордов',
     'fifty_prs': '50 личных рекордов',
+    'hundred_prs': '100 личных рекордов',
+    'two_fifty_prs': '250 личных рекордов',
+    'two_fifty_workouts': 'Завершите 250 тренировок',
+    'five_hundred_workouts': 'Завершите 500 тренировок',
+    'streak_26_weeks': 'Полгода подряд по 2+ тренировки в неделю',
+    'streak_52_weeks': 'Год подряд по 2+ тренировки в неделю',
+    'tonnage_100t': 'Поднимите 100 тонн за всё время',
+    'tonnage_500t': 'Поднимите 500 тонн за всё время',
+    'tonnage_1000t': 'Поднимите 1000 тонн за всё время',
+    'quest_week_all': 'Выполните все три задания недели',
     'high_volume_session': '20+ рабочих подходов за тренировку',
     'comeback_after_break': 'Вернитесь после паузы в 10+ дней',
     'return_after_sick_leave': 'Первая тренировка после больничного',
@@ -1210,6 +1386,16 @@ def _achievement_title(code: str) -> str:
         'streak_8_weeks': 'Серия 8 недель',
         'streak_12_weeks': 'Серия 12 недель',
         'ten_ideal_weeks': '10 идеальных недель',
+        'two_fifty_workouts': '250 тренировок',
+        'five_hundred_workouts': '500 тренировок',
+        'hundred_prs': '100 рекордов',
+        'two_fifty_prs': '250 рекордов',
+        'streak_26_weeks': 'Серия полгода',
+        'streak_52_weeks': 'Серия год',
+        'tonnage_100t': '100 тонн',
+        'tonnage_500t': '500 тонн',
+        'tonnage_1000t': '1000 тонн',
+        'quest_week_all': 'Неделя заданий',
         'good_week': 'Хорошая неделя',
         'ideal_week': 'Идеальная неделя',
         'first_perfect_month': 'Первый идеальный месяц',
@@ -1221,7 +1407,7 @@ def _achievement_title(code: str) -> str:
         'high_volume_session': '20 рабочих подходов',
         'comeback_after_break': 'Первая тренировка после паузы',
         'return_after_sick_leave': 'Возвращение после больничного',
-    }.get(code, code)
+    }.get(code) or gamification.club_title(code) or code
 
 
 def _record_label(record_type: str) -> str:
