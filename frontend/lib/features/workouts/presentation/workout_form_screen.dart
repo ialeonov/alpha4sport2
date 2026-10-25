@@ -1177,16 +1177,22 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop) {
-          await _handleBackPressed();
+          _isFinished ? await _handleBackPressed() : await _handleMinimize();
         }
       },
       child: Scaffold(
         appBar: AppBar(
-          leading: IconButton(
-            onPressed: _handleBackPressed,
-            tooltip: 'Назад',
-            icon: const Icon(Icons.arrow_back),
-          ),
+          leading: _isFinished
+              ? IconButton(
+                  onPressed: _handleBackPressed,
+                  tooltip: 'Назад',
+                  icon: const Icon(Icons.arrow_back),
+                )
+              : IconButton(
+                  onPressed: _savingToServer ? null : _handleMinimize,
+                  tooltip: 'Свернуть — тренировка сохранится',
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+                ),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -1204,6 +1210,31 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
           backgroundColor: Colors.transparent,
           actions: [
             if (!_isFinished) RestTimerButton(controller: _restTimer),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FilledButton(
+                onPressed: _savingToServer
+                    ? null
+                    : _isFinished
+                        ? () => _saveWorkout(finishWorkout: false)
+                        : _handleFinishPressed,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 38),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  textStyle: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 14),
+                ),
+                child: _savingToServer
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(_isFinished ? 'Сохранить' : 'Завершить'),
+              ),
+            ),
             PopupMenuButton<String>(
               tooltip: 'Ещё',
               onSelected: (value) {
@@ -1232,59 +1263,6 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               ),
           ],
         ),
-        bottomNavigationBar: SafeArea(
-          top: false,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerLow.withValues(alpha: 0.98),
-              border: Border(
-                top: BorderSide(
-                  color: scheme.outlineVariant.withValues(alpha: 0.35),
-                ),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _savingToServer
-                            ? null
-                            : _isFinished
-                                ? () => _saveWorkout(finishWorkout: false)
-                                : _handleMinimize,
-                        icon: _savingToServer
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(_isFinished
-                                ? Icons.save_outlined
-                                : Icons.minimize_outlined),
-                        label: Text(_isFinished ? 'Сохранить' : 'Свернуть'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _savingToServer || _isFinished
-                            ? null
-                            : _handleFinishPressed,
-                        icon: const Icon(Icons.check_circle_outline),
-                        label: Text(_isFinished ? 'Завершена' : 'Завершить'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
         body: AppBackdrop(
           child: Column(
             children: [
@@ -1292,7 +1270,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
               Expanded(
                 child: ListView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                   children: [
                     if (_workoutNoteController.text.isNotEmpty)
                       Padding(
@@ -1623,8 +1601,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                                                                 1,
                                                                             overflow:
                                                                                 TextOverflow.ellipsis,
-                                                                            'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}'
-                                                                            '${_recordLabel(exercise.nameController.text)}',
+                                                                            'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}',
                                                                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                                                                   color: scheme.onSurfaceVariant,
                                                                                 ),
@@ -1890,6 +1867,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                         setNumber: seed.setNumber,
                                         initialWeight: seed.weight,
                                         initialReps: seed.reps,
+                                        hint: _recordLabel(
+                                                exercise.nameController.text)
+                                            .replaceFirst(' · ', ''),
                                         restSeconds:
                                             RestTimerController.lastSeconds,
                                         onSubmit: (weight, reps, rpe) =>

@@ -956,24 +956,31 @@ class CoachService:
             'insufficient_data': 'МАЛО ДАННЫХ',
         }
 
-        lines: list[str] = []
+        # Только сводка: счётчики по решениям и несколько названий с весом.
+        # Полная история подходов раздувала запрос и оседала в памяти агента.
+        groups: dict[str, list[dict]] = {}
         for ex in exercises:
-            sessions = (ex.get('sessions') or [])[-3:]
-            sessions_text = ', '.join(
-                f"{s.get('date', '?')}: {s.get('weight', 0)}кг×{s.get('reps', 0)}"
-                for s in sessions
+            groups.setdefault(ex.get('decision', 'keep'), []).append(ex)
+
+        def _weights(ex: dict) -> tuple[float, float]:
+            sessions = ex.get('sessions') or [{}]
+            return (
+                float(sessions[0].get('weight') or 0),
+                float(sessions[-1].get('weight') or 0),
             )
-            label = _DECISION_LABELS.get(ex.get('decision', 'keep'), 'ДЕРЖАТЬ ВЕС')
-            delta = ex.get('delta_weight', 0.0)
-            delta_str = f'+{delta}кг' if delta > 0 else (f'{delta}кг' if delta < 0 else '')
-            rec_weight = ex.get('recommended_weight', 0)
-            rep_range = ex.get('rep_range', '?')
-            lines.append(
-                f'- {ex["name"]}: {label} → {rec_weight}кг'
-                f'{f" ({delta_str})" if delta_str else ""}, '
-                f'диапазон {rep_range} повт'
-                f'{f", последние сессии: [{sessions_text}]" if sessions_text else ""}'
-            )
+
+        def _example(ex: dict) -> str:
+            # Клиент присылает сессии от новой к старой.
+            latest, oldest = _weights(ex)
+            was = f', было {oldest:g}' if latest != oldest else ''
+            return f"{ex['name']} ({latest:g} кг{was})"
+
+        lines: list[str] = [f'Всего упражнений: {len(exercises)}.']
+        for decision in ('increase', 'stalled', 'decrease', 'keep', 'insufficient_data'):
+            items = groups.get(decision) or []
+            if items:
+                examples = ', '.join(_example(ex) for ex in items[:4])
+                lines.append(f'{_DECISION_LABELS[decision]}: {len(items)} — {examples}')
 
         exercises_block = '\n'.join(lines)
 

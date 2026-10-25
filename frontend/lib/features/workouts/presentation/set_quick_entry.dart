@@ -15,6 +15,7 @@ class SetQuickEntry extends StatefulWidget {
     required this.initialReps,
     required this.onSubmit,
     this.restSeconds,
+    this.hint = '',
   });
 
   final int setNumber;
@@ -24,6 +25,9 @@ class SetQuickEntry extends StatefulWidget {
   /// Длительность отдыха, которая запустится после записи (для подписи).
   final int? restSeconds;
   final void Function(double weight, int reps, double? rpe) onSubmit;
+
+  /// Подсказка справа от номера подхода (например, «рекорд 100 кг»).
+  final String hint;
 
   @override
   State<SetQuickEntry> createState() => _SetQuickEntryState();
@@ -93,12 +97,25 @@ class _SetQuickEntryState extends State<SetQuickEntry> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Подход ${widget.setNumber}',
-            style: textTheme.labelLarge?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Text(
+                'Подход ${widget.setNumber}',
+                style: textTheme.labelLarge?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (widget.hint.isNotEmpty)
+                Text(
+                  widget.hint,
+                  style: textTheme.labelMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
