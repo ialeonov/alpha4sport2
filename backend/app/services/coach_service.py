@@ -855,11 +855,10 @@ class CoachService:
             )[:400]
         avoid_repeat = (
             f'Прошлый брифинг был таким: «{previous_insight}». Во втором предложении '
-            'выбери ДРУГОЕ упражнение или другую тему, чем в прошлый раз. '
-            'Не упоминай жим лёжа.\n'
+            'выбери ДРУГОЕ упражнение или другую тему, чем в прошлый раз.\n'
             if previous_insight
             else ''
-        )
+        ) + 'Не упоминай жим лёжа — пользователь просил не возвращаться к нему.\n'
 
         system_msg = (
             f'Ты персональный фитнес-коуч приложения "{_APP_DISPLAY_NAME}". '
@@ -898,7 +897,10 @@ class CoachService:
             content, ('headline', 'insight'),
         )
         headline = str(parsed.get('headline') or '').strip().upper()
-        insight = _complete_sentences(str(parsed.get('insight') or ''))
+        insight = _drop_sentences_about(
+            _complete_sentences(str(parsed.get('insight') or '')),
+            ('жим лёж', 'жим леж', 'жиме лёж', 'жиме леж'),
+        )
         result = {'headline': headline or 'ТРЕНИРОВКА', 'insight': insight}
         # Кэшируем только полноценный ответ — обрезанный перегенерируется.
         if headline and insight:
@@ -1953,6 +1955,14 @@ def _salvage_json_fields(content: str, fields: tuple[str, ...]) -> dict:
         if match:
             result[field] = match.group(1).replace('\\"', '"').replace('\\n', ' ')
     return result
+
+
+def _drop_sentences_about(text: str, markers: tuple[str, ...]) -> str:
+    """Убирает предложения с темами, к которым пользователь просил не
+    возвращаться (страховка, если модель нарушила инструкцию)."""
+    sentences = re.split(r'(?<=[.!?…])\s+', text or '')
+    kept = [s for s in sentences if not any(m in s.lower() for m in markers)]
+    return ' '.join(kept).strip()
 
 
 def _complete_sentences(text: str) -> str:
