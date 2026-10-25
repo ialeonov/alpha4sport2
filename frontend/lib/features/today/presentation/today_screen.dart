@@ -1060,17 +1060,15 @@ class _TodayScreenState extends State<TodayScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _TodayHeadline(
-                        dateLabel: _todayDateLabel(today),
+                      _TodayHeadline(dateLabel: _todayDateLabel(today)),
+                      SizedBox(height: isTall ? 16 : 10),
+                      _WorkoutDayCard(
                         headline: _dailyInsight?.headline.isNotEmpty == true
                             ? _dailyInsight!.headline
                             : (_todayFocus != null &&
                                     !_todayFocus!.isStartState)
                                 ? _todayFocus!.recommendedLabel
                                 : _todayFocus?.motivationHeadline,
-                      ),
-                      SizedBox(height: isTall ? 16 : 10),
-                      _WorkoutDayCard(
                         focus: _todayFocus,
                         dailyInsight: _dailyInsight,
                         templatesLoading: _templatesLoading,
@@ -1345,43 +1343,28 @@ class _WeekSummaryCard extends StatelessWidget {
 }
 
 class _TodayHeadline extends StatelessWidget {
-  const _TodayHeadline({required this.dateLabel, required this.headline});
+  const _TodayHeadline({required this.dateLabel});
 
   final String dateLabel;
-  final String? headline;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          dateLabel,
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.4,
-              ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          headline ?? 'ТРЕНИРОВКА',
-          style: TextStyle(
-            fontFamily: 'Bebas Neue Cyrillic',
-            fontSize: 44,
-            height: 1.0,
-            letterSpacing: 0.5,
-            color: scheme.onSurface,
-          ),
-        ),
-      ],
+    return Text(
+      dateLabel,
+      style: TextStyle(
+        fontFamily: 'Bebas Neue Cyrillic',
+        fontSize: 40,
+        height: 1.0,
+        letterSpacing: 0.5,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
     );
   }
 }
 
 class _WorkoutDayCard extends StatelessWidget {
   const _WorkoutDayCard({
+    required this.headline,
     required this.focus,
     required this.dailyInsight,
     required this.templatesLoading,
@@ -1391,6 +1374,8 @@ class _WorkoutDayCard extends StatelessWidget {
     required this.onStartAiCoach,
   });
 
+  /// Фокус дня от коуча (группы мышц), например «НОГИ И СПИНА».
+  final String? headline;
   final _TodayFocus? focus;
   final _DailyInsight? dailyInsight;
   final bool templatesLoading;
@@ -1412,7 +1397,7 @@ class _WorkoutDayCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (text != null && text.isNotEmpty) ...[
+          if ((text != null && text.isNotEmpty) || headline != null) ...[
             Row(
               children: [
                 Icon(Icons.auto_awesome_rounded,
@@ -1428,14 +1413,28 @@ class _WorkoutDayCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              text,
-              style: textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurface.withValues(alpha: 0.85),
-                height: 1.45,
+            if (headline != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                headline!,
+                style: TextStyle(
+                  fontFamily: 'Bebas Neue Cyrillic',
+                  fontSize: 30,
+                  height: 1.0,
+                  letterSpacing: 0.5,
+                  color: scheme.onSurface,
+                ),
               ),
-            ),
+            ],
+            const SizedBox(height: 8),
+            if (text != null && text.isNotEmpty)
+              Text(
+                text,
+                style: textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: 0.85),
+                  height: 1.45,
+                ),
+              ),
             const SizedBox(height: 14),
           ],
           Row(
