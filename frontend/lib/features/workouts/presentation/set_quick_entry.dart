@@ -5,8 +5,8 @@ import '../../../core/utils/formatters.dart';
 
 const _tabular = [FontFeature.tabularFigures()];
 
-/// Быстрый ввод следующего подхода: крупные цифры, ± в один тап, RPE.
-/// Рассчитан на одну руку и телефон, лежащий на скамье.
+/// Ввод следующего подхода: крупные числа, которые можно набрать с
+/// клавиатуры или поправить кнопками ±, и RPE в один тап.
 class SetQuickEntry extends StatefulWidget {
   const SetQuickEntry({
     super.key,
@@ -14,14 +14,12 @@ class SetQuickEntry extends StatefulWidget {
     required this.initialWeight,
     required this.initialReps,
     required this.onSubmit,
-    this.initialRpe,
     this.restSeconds,
   });
 
   final int setNumber;
   final double initialWeight;
   final int initialReps;
-  final double? initialRpe;
 
   /// Длительность отдыха, которая запустится после записи (для подписи).
   final int? restSeconds;
@@ -34,29 +32,50 @@ class SetQuickEntry extends StatefulWidget {
 class _SetQuickEntryState extends State<SetQuickEntry> {
   static const _rpeValues = [6.0, 7.0, 8.0, 9.0, 10.0];
 
-  late double _weight = widget.initialWeight;
-  late int _reps = widget.initialReps;
-  late double? _rpe = widget.initialRpe;
+  late final TextEditingController _weight =
+      TextEditingController(text: formatWeight(widget.initialWeight));
+  late final TextEditingController _reps =
+      TextEditingController(text: '${widget.initialReps}');
+  double? _rpe;
 
   @override
   void didUpdateWidget(covariant SetQuickEntry oldWidget) {
     super.didUpdateWidget(oldWidget);
     // После записи подхода предлагаем те же значения для следующего.
     if (oldWidget.setNumber != widget.setNumber) {
-      _weight = widget.initialWeight;
-      _reps = widget.initialReps;
+      _weight.text = formatWeight(widget.initialWeight);
+      _reps.text = '${widget.initialReps}';
       _rpe = null;
     }
   }
 
+  @override
+  void dispose() {
+    _weight.dispose();
+    _reps.dispose();
+    super.dispose();
+  }
+
+  double get _weightValue =>
+      double.tryParse(_weight.text.trim().replaceAll(',', '.')) ?? 0;
+  int get _repsValue => int.tryParse(_reps.text.trim()) ?? 0;
+
   void _changeWeight(double delta) {
     HapticFeedback.selectionClick();
-    setState(() => _weight = (_weight + delta).clamp(0, 1500).toDouble());
+    final next = (_weightValue + delta).clamp(0, 1500).toDouble();
+    setState(() => _weight.text = formatWeight(next));
   }
 
   void _changeReps(int delta) {
     HapticFeedback.selectionClick();
-    setState(() => _reps = (_reps + delta).clamp(1, 999));
+    setState(() => _reps.text = '${(_repsValue + delta).clamp(1, 999)}');
+  }
+
+  void _submit() {
+    if (_repsValue <= 0) return;
+    FocusScope.of(context).unfocus();
+    HapticFeedback.mediumImpact();
+    widget.onSubmit(_weightValue, _repsValue, _rpe);
   }
 
   @override
@@ -81,41 +100,50 @@ class _SetQuickEntryState extends State<SetQuickEntry> {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
-                child: _Stepper(
-                  label: 'кг',
-                  value: formatWeight(_weight),
+                child: _NumberStepper(
+                  controller: _weight,
+                  unit: 'кг',
+                  decimal: true,
                   onMinus: () => _changeWeight(-2.5),
                   onPlus: () => _changeWeight(2.5),
                   minusLabel: 'Минус 2,5 кг',
                   plusLabel: 'Плюс 2,5 кг',
+                  fieldLabel: 'Вес, кг',
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                child: _Stepper(
-                  label: 'повт.',
-                  value: '$_reps',
+                child: _NumberStepper(
+                  controller: _reps,
+                  unit: 'повт.',
+                  decimal: false,
                   onMinus: () => _changeReps(-1),
                   onPlus: () => _changeReps(1),
                   minusLabel: 'Минус повтор',
                   plusLabel: 'Плюс повтор',
+                  fieldLabel: 'Повторы',
+                  onSubmitted: _submit,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            'Насколько тяжело (RPE)',
-            style:
-                textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 6),
           Row(
             children: [
+              SizedBox(
+                width: 40,
+                child: Text(
+                  'RPE',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
               for (final value in _rpeValues) ...[
                 Expanded(
                   child: _RpeButton(
@@ -131,15 +159,10 @@ class _SetQuickEntryState extends State<SetQuickEntry> {
               ],
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           FilledButton(
-            onPressed: _reps > 0
-                ? () {
-                    HapticFeedback.mediumImpact();
-                    widget.onSubmit(_weight, _reps, _rpe);
-                  }
-                : null,
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 54)),
+            onPressed: _submit,
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 52)),
             child: Text(
               rest == null
                   ? 'Записать подход'
@@ -152,22 +175,28 @@ class _SetQuickEntryState extends State<SetQuickEntry> {
   }
 }
 
-class _Stepper extends StatelessWidget {
-  const _Stepper({
-    required this.label,
-    required this.value,
+class _NumberStepper extends StatelessWidget {
+  const _NumberStepper({
+    required this.controller,
+    required this.unit,
+    required this.decimal,
     required this.onMinus,
     required this.onPlus,
     required this.minusLabel,
     required this.plusLabel,
+    required this.fieldLabel,
+    this.onSubmitted,
   });
 
-  final String label;
-  final String value;
+  final TextEditingController controller;
+  final String unit;
+  final bool decimal;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
   final String minusLabel;
   final String plusLabel;
+  final String fieldLabel;
+  final VoidCallback? onSubmitted;
 
   @override
   Widget build(BuildContext context) {
@@ -186,20 +215,45 @@ class _Stepper extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                FittedBox(
-                  child: Text(
-                    value,
-                    style: TextStyle(
-                      fontFamily: 'Bebas Neue Cyrillic',
-                      fontSize: 36,
-                      height: 1,
-                      color: scheme.onSurface,
-                      fontFeatures: _tabular,
+                // Число вводится и с клавиатуры: тап — выделяется целиком.
+                TextField(
+                  controller: controller,
+                  textAlign: TextAlign.center,
+                  keyboardType:
+                      TextInputType.numberWithOptions(decimal: decimal),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(decimal ? r'[0-9.,]' : r'[0-9]'),
                     ),
+                  ],
+                  textInputAction: onSubmitted == null
+                      ? TextInputAction.next
+                      : TextInputAction.done,
+                  onSubmitted: (_) => onSubmitted?.call(),
+                  onTap: () => controller.selection = TextSelection(
+                    baseOffset: 0,
+                    extentOffset: controller.text.length,
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Bebas Neue Cyrillic',
+                    fontSize: 30,
+                    height: 1,
+                    color: scheme.onSurface,
+                    fontFeatures: _tabular,
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: scheme.primary, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.only(top: 4, bottom: 2),
                   ),
                 ),
                 Text(
-                  label,
+                  unit,
                   style: Theme.of(context)
                       .textTheme
                       .labelSmall
@@ -227,17 +281,19 @@ class _StepButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 44,
-      height: 48,
+      width: 34,
+      height: 52,
       child: IconButton(
         tooltip: label,
         onPressed: onTap,
         style: IconButton.styleFrom(
           backgroundColor: scheme.surfaceContainerLow,
+          padding: EdgeInsets.zero,
+          minimumSize: const Size(34, 52),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
         ),
-        icon: Icon(icon, color: scheme.onSurface),
+        icon: Icon(icon, size: 20, color: scheme.onSurface),
       ),
     );
   }
@@ -258,14 +314,14 @@ class _RpeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 44,
+      height: 42,
       child: TextButton(
         onPressed: onTap,
         style: TextButton.styleFrom(
           padding: EdgeInsets.zero,
           backgroundColor:
-              selected ? scheme.onSurface : scheme.surfaceContainerLow,
-          foregroundColor: selected ? scheme.surface : scheme.onSurface,
+              selected ? scheme.primary : scheme.surfaceContainerLow,
+          foregroundColor: selected ? scheme.onPrimary : scheme.onSurface,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
           textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),

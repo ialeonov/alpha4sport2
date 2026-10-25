@@ -70,16 +70,19 @@ class _WorkoutCompletionSheet extends StatelessWidget {
     final levelUp = a != null && b != null && a.level > b.level;
     final newPrCount =
         (a != null && b != null) ? (a.totalPrCount - b.totalPrCount) : 0;
-    final newRecords =
-        a == null || newPrCount <= 0 ? const <RecordData>[] : a.recentRecords.take(newPrCount).toList();
+    final newRecords = a == null || newPrCount <= 0
+        ? const <RecordData>[]
+        : a.recentRecords.take(newPrCount).toList();
     final unlockedBefore = {
-      for (final item in b?.achievementCatalog ?? const <AchievementCatalogItem>[])
+      for (final item
+          in b?.achievementCatalog ?? const <AchievementCatalogItem>[])
         if (item.unlocked) item.code,
     };
     final newAchievements = b == null
         ? const <AchievementCatalogItem>[]
         : (a?.achievementCatalog ?? const <AchievementCatalogItem>[])
-            .where((item) => item.unlocked && !unlockedBefore.contains(item.code))
+            .where(
+                (item) => item.unlocked && !unlockedBefore.contains(item.code))
             .toList();
     final duration = _durationMinutes;
 
@@ -91,12 +94,14 @@ class _WorkoutCompletionSheet extends StatelessWidget {
           children: [
             Text(
               'Тренировка завершена',
-              style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+              style: textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 4),
             Text(
               (workout['name'] ?? '').toString(),
-              style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+              style: textTheme.bodyMedium
+                  ?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             Row(
@@ -154,7 +159,8 @@ class _WorkoutCompletionSheet extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 'Новые рекорды',
-                style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                style:
+                    textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
               for (final record in newRecords)
@@ -162,7 +168,8 @@ class _WorkoutCompletionSheet extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Row(
                     children: [
-                      const Icon(Icons.emoji_events_rounded, color: _gold, size: 18),
+                      const Icon(Icons.emoji_events_rounded,
+                          color: _gold, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -178,7 +185,8 @@ class _WorkoutCompletionSheet extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 'Новые достижения',
-                style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                style:
+                    textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
               for (final item in newAchievements)
@@ -188,7 +196,8 @@ class _WorkoutCompletionSheet extends StatelessWidget {
                     children: [
                       Icon(achievementIcon(item.code), color: _gold, size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(item.title, style: textTheme.bodyMedium)),
+                      Expanded(
+                          child: Text(item.title, style: textTheme.bodyMedium)),
                     ],
                   ),
                 ),
@@ -233,7 +242,8 @@ class _WeekProgress extends StatelessWidget {
             margin: const EdgeInsets.only(right: 6),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: i <= count ? scheme.primary : scheme.surfaceContainerHighest,
+              color:
+                  i <= count ? scheme.primary : scheme.surfaceContainerHighest,
             ),
             child: i <= count
                 ? Icon(Icons.check_rounded, size: 16, color: scheme.onPrimary)
@@ -259,11 +269,13 @@ class _Stat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value, style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          Text(value,
+              style:
+                  textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
           Text(
             label,
-            style: textTheme.labelSmall
-                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ],
       ),

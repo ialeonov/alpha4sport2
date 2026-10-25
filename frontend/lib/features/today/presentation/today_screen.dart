@@ -11,6 +11,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
+import '../../progression/application/progression_controller.dart';
 import '../../wellness/data/wellness_repository.dart';
 import '../../wellness/domain/wellness_entry.dart';
 import '../../wellness/presentation/wellness_widgets.dart';
@@ -1058,10 +1059,16 @@ class _TodayScreenState extends State<TodayScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      ScreenHeader(
-                        title: 'Сегодня ${_todayDateLabel(today)}',
+                      _TodayHeadline(
+                        dateLabel: _todayDateLabel(today),
+                        headline: _dailyInsight?.headline.isNotEmpty == true
+                            ? _dailyInsight!.headline
+                            : (_todayFocus != null &&
+                                    !_todayFocus!.isStartState)
+                                ? _todayFocus!.recommendedLabel
+                                : _todayFocus?.motivationHeadline,
                       ),
-                      SizedBox(height: isTall ? 20 : 12),
+                      SizedBox(height: isTall ? 16 : 10),
                       _WorkoutDayCard(
                         focus: _todayFocus,
                         dailyInsight: _dailyInsight,
@@ -1075,6 +1082,7 @@ class _TodayScreenState extends State<TodayScreen> {
                       const SizedBox(height: 10),
                       _WeekSummaryCard(summary: _summary),
                       const SizedBox(height: 10),
+                      const _NextGoalCard(),
                       WellnessCard(
                         entry: _todayWellness,
                         date: DateUtils.dateOnly(DateTime.now()),
@@ -1114,6 +1122,15 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   static String _todayDateLabel(DateTime date) {
+    const weekdays = [
+      'ПОНЕДЕЛЬНИК',
+      'ВТОРНИК',
+      'СРЕДА',
+      'ЧЕТВЕРГ',
+      'ПЯТНИЦА',
+      'СУББОТА',
+      'ВОСКРЕСЕНЬЕ',
+    ];
     const months = [
       'января',
       'февраля',
@@ -1128,7 +1145,8 @@ class _TodayScreenState extends State<TodayScreen> {
       'ноября',
       'декабря',
     ];
-    return '${date.day} ${months[date.month - 1]}';
+    return '${weekdays[date.weekday - 1]}, ${date.day} '
+        '${months[date.month - 1].toUpperCase()}';
   }
 
   // ── Мышечные тиры ─────────────────────────────────────────────────────────
@@ -1239,140 +1257,74 @@ class _WeekSummaryCard extends StatelessWidget {
     final done = summary.weekCount;
     final target = summary.weeklyTarget;
     final remaining = max(0, target - done);
-    final isComplete = done >= target;
-    final accentColor = isComplete ? scheme.tertiary : scheme.secondary;
 
     return DashboardCard(
-      padding: const EdgeInsets.all(14),
-      color: Color.alphaBlend(
-        scheme.secondary.withValues(alpha: 0.06),
-        scheme.surfaceContainerLow,
-      ),
-      borderColor: scheme.outlineVariant.withValues(alpha: 0.18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Прогресс-кольцо ─────────────────────────
-          SizedBox(
-            width: 54,
-            height: 54,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircularProgressIndicator(
-                  value: target > 0 ? (done / target).clamp(0.0, 1.0) : 0.0,
-                  strokeWidth: 4.5,
-                  strokeCap: StrokeCap.round,
-                  backgroundColor:
-                      scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                  color: accentColor,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                'Неделя: $done из $target',
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
+              ),
+              const Spacer(),
+              Text(
+                remaining > 0
+                    ? _remainingLabel(remaining, today)
+                    : 'Цель выполнена',
+                style: textTheme.bodySmall?.copyWith(
+                  color:
+                      remaining > 0 ? scheme.onSurfaceVariant : scheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: List.generate(7, (index) {
+              final weekday = index + 1;
+              final isActive = summary.activeWeekdays.contains(weekday);
+              final isToday = weekday == today;
+              return Expanded(
+                child: Column(
                   children: [
-                    Text(
-                      '$done',
-                      style: textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        height: 1.0,
-                        color: accentColor,
-                      ),
-                    ),
                     Container(
-                      height: 1,
-                      width: 18,
-                      color: accentColor.withValues(alpha: 0.4),
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isActive
+                            ? scheme.primary
+                            : scheme.surfaceContainerHigh,
+                        border: isToday && !isActive
+                            ? Border.all(color: scheme.primary, width: 1.5)
+                            : null,
+                      ),
+                      child: isActive
+                          ? Icon(Icons.check_rounded,
+                              size: 18, color: scheme.onPrimary)
+                          : null,
                     ),
+                    const SizedBox(height: 6),
                     Text(
-                      '$target',
+                      _dayLabels[index],
                       style: textTheme.labelSmall?.copyWith(
-                        color: accentColor.withValues(alpha: 0.8),
-                        height: 1.2,
+                        color: isToday
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant,
+                        fontWeight: isToday ? FontWeight.w800 : FontWeight.w500,
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-
-          // ── Текст + дни-пиллы ───────────────────────
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$done из $target тренировок',
-                  style: textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                if (remaining > 0)
-                  Text(
-                    _remainingLabel(remaining, today),
-                    style: textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  )
-                else
-                  Text(
-                    'Цель недели выполнена 🎉',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: scheme.tertiary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                const SizedBox(height: 10),
-                Row(
-                  children: List.generate(7, (index) {
-                    final weekday = index + 1;
-                    final isActive = summary.activeWeekdays.contains(weekday);
-                    final isToday = weekday == today;
-
-                    final Color bg;
-                    final Color fg;
-                    if (isActive) {
-                      bg = accentColor;
-                      fg = scheme.onSecondary;
-                    } else if (isToday) {
-                      bg = accentColor.withValues(alpha: 0.18);
-                      fg = accentColor;
-                    } else {
-                      bg = scheme.surfaceContainerHighest
-                          .withValues(alpha: 0.28);
-                      fg = scheme.onSurfaceVariant.withValues(alpha: 0.5);
-                    }
-
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: bg,
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            _dayLabels[index],
-                            style: textTheme.labelSmall?.copyWith(
-                              fontSize: 10,
-                              fontWeight: isActive || isToday
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              color: fg,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ],
-            ),
+              );
+            }),
           ),
         ],
       ),
@@ -1380,14 +1332,50 @@ class _WeekSummaryCard extends StatelessWidget {
   }
 
   static String _remainingLabel(int remaining, int todayWeekday) {
-    if (remaining == 1 && todayWeekday >= 5) return 'Осталась одна – сегодня!';
-    if (remaining == 1) return 'Осталась одна тренировка';
+    if (remaining == 1 && todayWeekday >= 5) return 'осталась одна — сегодня?';
+    if (remaining == 1) return 'осталась одна';
     if (remaining % 10 >= 2 &&
         remaining % 10 <= 4 &&
         (remaining % 100 < 10 || remaining % 100 >= 20)) {
-      return 'Осталось $remaining тренировки';
+      return 'осталось $remaining';
     }
-    return 'Осталось $remaining тренировок';
+    return 'осталось $remaining';
+  }
+}
+
+class _TodayHeadline extends StatelessWidget {
+  const _TodayHeadline({required this.dateLabel, required this.headline});
+
+  final String dateLabel;
+  final String? headline;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          dateLabel,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.4,
+              ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          headline ?? 'ТРЕНИРОВКА',
+          style: TextStyle(
+            fontFamily: 'Bebas Neue Cyrillic',
+            fontSize: 44,
+            height: 1.0,
+            letterSpacing: 0.5,
+            color: scheme.onSurface,
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -1413,69 +1401,41 @@ class _WorkoutDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-
-    // Определяем заголовок: AI-инсайт приоритетнее алгоритма
-    final headline = dailyInsight?.headline.isNotEmpty == true
-        ? dailyInsight!.headline
-        : (focus != null && !focus!.isStartState)
-            ? focus!.recommendedLabel
-            : focus?.motivationHeadline;
+    final textTheme = Theme.of(context).textTheme;
+    final text = dailyInsight?.insight.isNotEmpty == true
+        ? dailyInsight!.insight
+        : (focus?.isStartState == true ? focus?.motivationSubtext : null);
 
     return DashboardCard(
-      color: Color.alphaBlend(
-        scheme.secondary.withValues(alpha: 0.06),
-        scheme.surfaceContainerLow,
-      ),
-      borderColor: scheme.secondary.withValues(alpha: 0.18),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (headline != null) ...[
-            // ── Заголовок (AI или алгоритм) ──────────────
-            Text(
-              dailyInsight != null ? 'AI-КОУЧ' : 'РЕКОМЕНДУЕМ',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: dailyInsight != null
-                        ? scheme.primary.withValues(alpha: 0.75)
-                        : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.4,
+          if (text != null && text.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded,
+                    size: 16, color: scheme.secondary),
+                const SizedBox(width: 6),
+                Text(
+                  dailyInsight != null ? 'AI-КОУЧ' : 'РЕКОМЕНДУЕМ',
+                  style: textTheme.labelSmall?.copyWith(
+                    color: scheme.secondary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
                   ),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
-              headline,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontFamily: 'Bebas Neue Cyrillic',
-                    fontSize: 32,
-                    letterSpacing: 1.0,
-                    height: 1.0,
-                  ),
+              text,
+              style: textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurface.withValues(alpha: 0.85),
+                height: 1.45,
+              ),
             ),
-            // ── Текст инсайта (только если есть AI-ответ) ─
-            if (dailyInsight?.insight.isNotEmpty == true) ...[
-              const SizedBox(height: 6),
-              Text(
-                dailyInsight!.insight,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      height: 1.4,
-                    ),
-              ),
-            ] else if (focus != null &&
-                focus!.isStartState &&
-                focus!.motivationSubtext != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                focus!.motivationSubtext!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
             const SizedBox(height: 14),
-          ] else ...[
-            const SizedBox(height: 4),
           ],
           Row(
             children: [
@@ -1483,35 +1443,101 @@ class _WorkoutDayCard extends StatelessWidget {
                 child: FilledButton(
                   onPressed: onStartWorkout,
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFD4A017),
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    minimumSize: const Size(0, 54),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     textStyle: const TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 15,
+                      fontSize: 16,
                     ),
                   ),
-                  child: const Text('Начать тренировку'),
+                  child: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Начать тренировку', maxLines: 1),
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               _IconActionButton(
                 icon: templatesLoading ? null : Icons.library_books_outlined,
                 loading: templatesLoading,
-                tooltip: 'Шаблон',
+                tooltip: 'Из шаблона',
                 onTap: templatesLoading ? null : onStartTemplate,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 10),
               _IconActionButton(
                 icon: aiCoachLoading ? null : Icons.auto_awesome_outlined,
                 loading: aiCoachLoading,
-                tooltip: 'AI-план',
+                tooltip: 'Собрать с AI',
                 onTap: aiCoachLoading ? null : onStartAiCoach,
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Ближайшее достижение с прогрессом — короткая цель на главном экране.
+class _NextGoalCard extends StatelessWidget {
+  const _NextGoalCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: ProgressionController.instance,
+      builder: (context, _) {
+        final catalog =
+            ProgressionController.instance.profile?.achievementCatalog ??
+                const [];
+        final candidates = catalog
+            .where((a) => !a.unlocked && a.target > 1 && a.progress > 0)
+            .toList()
+          ..sort((a, b) => b.ratio.compareTo(a.ratio));
+        if (candidates.isEmpty) return const SizedBox.shrink();
+        final goal = candidates.first;
+        final scheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: DashboardCard(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Ближайшая цель · ${goal.title}',
+                        style: textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    Text(
+                      '${goal.progress}/${goal.target}',
+                      style: textTheme.labelLarge?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: goal.ratio,
+                    minHeight: 6,
+                    color: scheme.primary,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1538,12 +1564,12 @@ class _IconActionButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          width: 46,
-          height: 46,
+          width: 54,
+          height: 54,
           decoration: BoxDecoration(
-            border:
-                Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-            borderRadius: BorderRadius.circular(14),
+            color: scheme.surfaceContainerHigh,
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Center(
             child: loading

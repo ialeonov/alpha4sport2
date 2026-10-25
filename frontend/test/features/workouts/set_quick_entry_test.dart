@@ -46,6 +46,27 @@ void main() {
     expect(rpe, 9);
   });
 
+  testWidgets('weight and reps can be typed from the keyboard',
+      (tester) async {
+    double? weight;
+    int? reps;
+    await tester.pumpWidget(_wrap(SetQuickEntry(
+      setNumber: 1,
+      initialWeight: 55,
+      initialReps: 10,
+      onSubmit: (w, r, _) {
+        weight = w;
+        reps = r;
+      },
+    )));
+
+    await tester.enterText(find.byType(TextField).at(0), '67,5');
+    await tester.enterText(find.byType(TextField).at(1), '12');
+    await tester.tap(find.text('Записать подход'));
+    expect(weight, 67.5);
+    expect(reps, 12);
+  });
+
   testWidgets('quick entry resets to new seed for the next set',
       (tester) async {
     Widget build(int setNumber, double weight) => _wrap(SetQuickEntry(

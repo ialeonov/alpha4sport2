@@ -625,6 +625,26 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     );
   }
 
+  /// Правка уже записанного подхода: вес, повторы, RPE, разминка, удаление.
+  Future<void> _editSet(int exerciseIndex, int setIndex) async {
+    final exercise = _exercises[exerciseIndex];
+    final set = exercise.sets[setIndex];
+    final delete = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _SetEditSheet(set: set),
+    );
+    if (!mounted) return;
+    setState(() {
+      if (delete == true) {
+        exercise.sets.removeAt(setIndex).dispose();
+        if (exercise.sets.isEmpty) exercise.sets.add(_SetDraft.empty());
+      }
+    });
+    _handleDraftChanged();
+  }
+
   /// « · рекорд 115 кг», если у упражнения есть рекорд в прогрессии.
   String _recordLabel(String exerciseName) {
     final key = _normalizeExerciseLookupName(exerciseName);
@@ -1167,10 +1187,39 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
             tooltip: 'Назад',
             icon: const Icon(Icons.arrow_back),
           ),
-          title: Text(_isEditing ? 'Тренировка' : 'Новая тренировка'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_isEditing ? 'Тренировка' : 'Новая тренировка'),
+              Text(
+                '${formatShortDate(_selectedDate)} · ${_saveStatusLabel()}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: _saveStatusColor(scheme),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
           backgroundColor: Colors.transparent,
           actions: [
             if (!_isFinished) RestTimerButton(controller: _restTimer),
+            PopupMenuButton<String>(
+              tooltip: 'Ещё',
+              onSelected: (value) {
+                if (value == 'date') _pickDate();
+                if (value == 'note') _openWorkoutNoteDialog();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'date', child: Text('Дата и время')),
+                PopupMenuItem(
+                  value: 'note',
+                  child: Text(_workoutNoteController.text.isEmpty
+                      ? 'Добавить заметку'
+                      : 'Изменить заметку'),
+                ),
+              ],
+            ),
             if (_isEditing && _isFinished)
               IconButton(
                 icon: const Icon(Icons.ios_share_rounded),
@@ -1198,35 +1247,6 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: _saveStatusColor(scheme),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _saveStatusLabel(),
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: _saveStatusColor(scheme),
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                    ),
-                    if (_restoredDraft)
-                      StatusBadge(
-                        label: 'Черновик',
-                        color: scheme.secondary,
-                        compact: true,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(
@@ -1274,116 +1294,23 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                   children: [
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        InkWell(
-                          borderRadius: BorderRadius.circular(999),
-                          onTap: _pickDate,
-                          child: StatusBadge(
-                            label: formatShortDate(_selectedDate),
-                            color: scheme.onSurfaceVariant,
-                            icon: Icons.calendar_today_outlined,
+                    if (_workoutNoteController.text.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: InkWell(
+                          onTap: _openWorkoutNoteDialog,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Text(
+                            _workoutNoteController.text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: scheme.onSurfaceVariant),
                           ),
                         ),
-                        StatusBadge(
-                          label: _isFinished ? 'Завершена' : 'В работе',
-                          color:
-                              _isFinished ? scheme.primary : scheme.secondary,
-                          icon: _isFinished
-                              ? Icons.check_circle_outline
-                              : Icons.fitness_center,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: _openWorkoutNoteDialog,
-                      child: _workoutNoteController.text.isNotEmpty
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: scheme.secondary.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color:
-                                      scheme.secondary.withValues(alpha: 0.25),
-                                ),
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 1),
-                                    child: Icon(
-                                      Icons.sticky_note_2_outlined,
-                                      size: 14,
-                                      color: scheme.secondary,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _workoutNoteController.text,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: scheme.onSurfaceVariant,
-                                          ),
-                                      maxLines: 3,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(
-                                    Icons.edit_outlined,
-                                    size: 13,
-                                    color: scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.45),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: scheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.4),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: scheme.outlineVariant
-                                      .withValues(alpha: 0.3),
-                                  style: BorderStyle.solid,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.sticky_note_2_outlined,
-                                    size: 14,
-                                    color: scheme.onSurfaceVariant
-                                        .withValues(alpha: 0.45),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Добавить заметку к тренировке',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: scheme.onSurfaceVariant
-                                              .withValues(alpha: 0.6),
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 12),
+                      ),
                     if (_catalogError != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
@@ -1689,15 +1616,19 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                                                           MainAxisSize
                                                                               .min,
                                                                       children: [
-                                                                        Text(
-                                                                          'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}'
-                                                                          '${_recordLabel(exercise.nameController.text)}',
-                                                                          style: Theme.of(context)
-                                                                              .textTheme
-                                                                              .bodySmall
-                                                                              ?.copyWith(
-                                                                                color: scheme.onSurfaceVariant,
-                                                                              ),
+                                                                        Flexible(
+                                                                          child:
+                                                                              Text(
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                            'Прошлый: ${formatWeight(lastWeight)}\u00A0кг\u00A0×\u00A0${lastSetState.lastSet!.reps}'
+                                                                            '${_recordLabel(exercise.nameController.text)}',
+                                                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                                                  color: scheme.onSurfaceVariant,
+                                                                                ),
+                                                                          ),
                                                                         ),
                                                                         if (hasDelta) ...[
                                                                           const SizedBox(
@@ -1842,103 +1773,111 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                 ],
                                 if (!exercise.isCollapsed) ...[
                                   const SizedBox(height: 10),
-                                  Builder(builder: (context) {
-                                    final isMobile =
-                                        MediaQuery.sizeOf(context).width < 600;
-                                    final labelStyle = Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: scheme.onSurfaceVariant
-                                              .withValues(alpha: 0.6),
-                                        );
-                                    return Padding(
-                                      padding: const EdgeInsets.only(
-                                          left: 38, bottom: 2),
-                                      child: Row(
-                                        children: [
-                                          if (isMobile) ...[
-                                            Expanded(
-                                              child: Center(
-                                                  child: Text('кг',
-                                                      style: labelStyle)),
-                                            ),
-                                            const SizedBox(width: 26),
-                                            Expanded(
-                                              child: Center(
-                                                  child: Text('раз',
-                                                      style: labelStyle)),
-                                            ),
-                                            const SizedBox(width: 72),
-                                          ] else ...[
-                                            SizedBox(
-                                              width: 110,
-                                              child: Center(
-                                                  child: Text('кг',
-                                                      style: labelStyle)),
-                                            ),
-                                            const SizedBox(width: 26),
-                                            SizedBox(
-                                              width: 110,
-                                              child: Center(
-                                                  child: Text('раз',
-                                                      style: labelStyle)),
-                                            ),
+                                  if (_isFinished) ...[
+                                    Builder(builder: (context) {
+                                      final isMobile =
+                                          MediaQuery.sizeOf(context).width <
+                                              600;
+                                      final labelStyle = Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant
+                                                .withValues(alpha: 0.6),
+                                          );
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                            left: 38, bottom: 2),
+                                        child: Row(
+                                          children: [
+                                            if (isMobile) ...[
+                                              Expanded(
+                                                child: Center(
+                                                    child: Text('кг',
+                                                        style: labelStyle)),
+                                              ),
+                                              const SizedBox(width: 26),
+                                              Expanded(
+                                                child: Center(
+                                                    child: Text('раз',
+                                                        style: labelStyle)),
+                                              ),
+                                              const SizedBox(width: 72),
+                                            ] else ...[
+                                              SizedBox(
+                                                width: 110,
+                                                child: Center(
+                                                    child: Text('кг',
+                                                        style: labelStyle)),
+                                              ),
+                                              const SizedBox(width: 26),
+                                              SizedBox(
+                                                width: 110,
+                                                child: Center(
+                                                    child: Text('раз',
+                                                        style: labelStyle)),
+                                              ),
+                                            ],
                                           ],
-                                        ],
+                                        ),
+                                      );
+                                    }),
+                                    ...List.generate(exercise.sets.length,
+                                        (setIndex) {
+                                      final set = exercise.sets[setIndex];
+                                      return Padding(
+                                        key: set.containerKey,
+                                        padding: EdgeInsets.only(
+                                          bottom: setIndex ==
+                                                  exercise.sets.length - 1
+                                              ? 0
+                                              : 2,
+                                        ),
+                                        child: _WorkoutSetRow(
+                                          index: setIndex,
+                                          set: set,
+                                          onChanged: _handleDraftChanged,
+                                          onToggleWarmup: () {
+                                            setState(() {
+                                              set.setType =
+                                                  set.setType == 'warmup'
+                                                      ? 'work'
+                                                      : 'warmup';
+                                            });
+                                            _handleDraftChanged();
+                                          },
+                                          onDelete: exercise.sets.length == 1
+                                              ? null
+                                              : () => _removeSet(
+                                                  exerciseIndex, setIndex),
+                                        ),
+                                      );
+                                    }),
+                                    const SizedBox(height: 6),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: TextButton.icon(
+                                        onPressed: () => _addSet(exerciseIndex),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: scheme.secondary,
+                                          visualDensity: VisualDensity.compact,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                        ),
+                                        icon: const Icon(
+                                            Icons.add_circle_outline_rounded,
+                                            size: 16),
+                                        label: const Text('подход',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w600)),
                                       ),
-                                    );
-                                  }),
-                                  ...List.generate(exercise.sets.length,
-                                      (setIndex) {
-                                    final set = exercise.sets[setIndex];
-                                    return Padding(
-                                      key: set.containerKey,
-                                      padding: EdgeInsets.only(
-                                        bottom:
-                                            setIndex == exercise.sets.length - 1
-                                                ? 0
-                                                : 2,
-                                      ),
-                                      child: _WorkoutSetRow(
-                                        index: setIndex,
-                                        set: set,
-                                        onChanged: _handleDraftChanged,
-                                        onToggleWarmup: () {
-                                          setState(() {
-                                            set.setType =
-                                                set.setType == 'warmup'
-                                                    ? 'work'
-                                                    : 'warmup';
-                                          });
-                                          _handleDraftChanged();
-                                        },
-                                        onDelete: exercise.sets.length == 1
-                                            ? null
-                                            : () => _removeSet(
-                                                exerciseIndex, setIndex),
-                                      ),
-                                    );
-                                  }),
-                                  const SizedBox(height: 6),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: TextButton.icon(
-                                      onPressed: () => _addSet(exerciseIndex),
-                                      style: TextButton.styleFrom(
-                                        foregroundColor: scheme.secondary,
-                                        visualDensity: VisualDensity.compact,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
-                                      ),
-                                      icon: const Icon(
-                                          Icons.add_circle_outline_rounded,
-                                          size: 16),
-                                      label: const Text('подход',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w600)),
                                     ),
-                                  ),
+                                  ] else
+                                    _DoneSetsList(
+                                      sets: exercise.sets,
+                                      onTap: (setIndex) =>
+                                          _editSet(exerciseIndex, setIndex),
+                                    ),
                                   if (!_isFinished && !isEmpty) ...[
                                     const SizedBox(height: 8),
                                     Builder(builder: (context) {
@@ -1971,42 +1910,62 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                       icon: const Icon(Icons.add),
                       label: const Text('Добавить упражнение'),
                     ),
-                    const SizedBox(height: 12),
-                    MuscleHeatmapCard(
-                      loads: heatmapLoads,
-                      showHeader: false,
-                      showMuscleList: true,
-                      emptyMessage:
-                          'Добавьте упражнения с подходами, чтобы увидеть тепловую карту.',
-                    ),
                     const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        'Тоннаж: ${formatTonnage(
-                          _exercises.fold<double>(
-                            0,
-                            (sum, exercise) =>
-                                sum +
-                                calculateExerciseTonnage({
-                                  'sets': exercise.sets.map((set) {
-                                    return {
-                                      'reps': int.tryParse(
-                                              set.repsController.text) ??
-                                          0,
-                                      'weight': _parseWeight(
-                                              set.weightController.text) ??
-                                          0,
-                                    };
-                                  }).toList(),
-                                }),
+                    Theme(
+                      data: Theme.of(context)
+                          .copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                        childrenPadding: EdgeInsets.zero,
+                        title: Text(
+                          'Нагрузка на мышцы',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        children: [
+                          MuscleHeatmapCard(
+                            loads: heatmapLoads,
+                            showHeader: false,
+                            showMuscleList: true,
+                            emptyMessage:
+                                'Добавьте упражнения с подходами, чтобы увидеть тепловую карту.',
                           ),
-                        )}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                          const SizedBox(height: 8),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(
+                              'Тоннаж: ${formatTonnage(
+                                _exercises.fold<double>(
+                                  0,
+                                  (sum, exercise) =>
+                                      sum +
+                                      calculateExerciseTonnage({
+                                        'sets': exercise.sets.map((set) {
+                                          return {
+                                            'reps': int.tryParse(
+                                                    set.repsController.text) ??
+                                                0,
+                                            'weight': _parseWeight(set
+                                                    .weightController.text) ??
+                                                0,
+                                          };
+                                        }).toList(),
+                                      }),
+                                ),
+                              )}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
                             ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -2015,6 +1974,167 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Сделанные подходы активной тренировки: одна строка на подход, тап — правка.
+class _DoneSetsList extends StatelessWidget {
+  const _DoneSetsList({required this.sets, required this.onTap});
+
+  final List<_SetDraft> sets;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final rows = <Widget>[];
+    var number = 0;
+    for (var i = 0; i < sets.length; i++) {
+      final set = sets[i];
+      if (set.weightController.text.trim().isEmpty) continue;
+      final warmup = set.setType == 'warmup';
+      if (!warmup) number++;
+      rows.add(InkWell(
+        key: set.containerKey,
+        onTap: () => onTap(i),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                child: Text(
+                  warmup ? 'Р' : '$number',
+                  style: textTheme.labelLarge
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ),
+              Text(
+                '${set.weightController.text} кг × ${set.repsController.text}',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: warmup ? scheme.onSurfaceVariant : scheme.onSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const Spacer(),
+              if (set.rpe != null)
+                Text(
+                  'RPE ${set.rpe!.toStringAsFixed(set.rpe! % 1 == 0 ? 0 : 1)}',
+                  style: textTheme.labelMedium
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              const SizedBox(width: 6),
+              Icon(Icons.edit_outlined,
+                  size: 16,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
+            ],
+          ),
+        ),
+      ));
+    }
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(children: rows),
+    );
+  }
+}
+
+class _SetEditSheet extends StatefulWidget {
+  const _SetEditSheet({required this.set});
+
+  final _SetDraft set;
+
+  @override
+  State<_SetEditSheet> createState() => _SetEditSheetState();
+}
+
+class _SetEditSheetState extends State<_SetEditSheet> {
+  static const _rpeValues = [6.0, 7.0, 8.0, 9.0, 10.0];
+
+  @override
+  Widget build(BuildContext context) {
+    final set = widget.set;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 0, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Подход',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: set.weightController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Вес, кг'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: set.repsController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Повторы'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              for (final value in _rpeValues) ...[
+                Expanded(
+                  child: ChoiceChip(
+                    label: Text('RPE ${value.toStringAsFixed(0)}'),
+                    selected: set.rpe == value,
+                    showCheckmark: false,
+                    onSelected: (_) => setState(
+                        () => set.rpe = set.rpe == value ? null : value),
+                  ),
+                ),
+                if (value != _rpeValues.last) const SizedBox(width: 4),
+              ],
+            ],
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Разминочный подход'),
+            value: set.setType == 'warmup',
+            onChanged: (value) =>
+                setState(() => set.setType = value ? 'warmup' : 'work'),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: TextButton.styleFrom(foregroundColor: scheme.error),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Удалить'),
+              ),
+              const Spacer(),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Готово'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
