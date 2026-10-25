@@ -1885,8 +1885,15 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                         ),
                       );
                     }),
-                    FilledButton.icon(
+                    // Второстепенное действие — контурная кнопка, чтобы не
+                    // спорить с золотой «Записать подход».
+                    OutlinedButton.icon(
                       onPressed: _addExercise,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 52),
+                        foregroundColor: scheme.primary,
+                        side: BorderSide(color: scheme.outlineVariant),
+                      ),
                       icon: const Icon(Icons.add),
                       label: const Text('Добавить упражнение'),
                     ),
