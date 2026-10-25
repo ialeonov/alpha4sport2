@@ -66,7 +66,8 @@ class _TodayScreenState extends State<TodayScreen> {
       final cachedAt = cached['cached_at'] as int?;
       final headline = cached['headline'] as String?;
       final insight = cached['insight'] as String?;
-      if (headline != null && insight != null) {
+      // Старые версии могли сохранить обрезанный JSON — такой кэш игнорируем.
+      if (headline != null && insight != null && !_isBrokenInsight(insight)) {
         if (mounted) {
           setState(() => _dailyInsight = _DailyInsight(
                 headline: headline,
@@ -91,7 +92,9 @@ class _TodayScreenState extends State<TodayScreen> {
       if (!mounted || data == null) return;
       final headline = (data['headline'] as String?)?.trim() ?? '';
       final insight = (data['insight'] as String?)?.trim() ?? '';
-      if (headline.isEmpty && insight.isEmpty) return;
+      if ((headline.isEmpty && insight.isEmpty) || _isBrokenInsight(insight)) {
+        return;
+      }
       await LocalCache.put(CacheKeys.coachDailyInsight, {
         'headline': headline,
         'insight': insight,
@@ -107,6 +110,9 @@ class _TodayScreenState extends State<TodayScreen> {
       // Не блокируем экран — инсайт опциональный
     }
   }
+
+  static bool _isBrokenInsight(String insight) =>
+      insight.trimLeft().startsWith('{') || insight.contains('"headline"');
 
   Future<void> _loadTodayWellness() async {
     final entry = WellnessRepository.loadForDate(DateTime.now());
@@ -1349,14 +1355,20 @@ class _TodayHeadline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      dateLabel,
-      style: TextStyle(
-        fontFamily: 'Bebas Neue Cyrillic',
-        fontSize: 40,
-        height: 1.0,
-        letterSpacing: 0.5,
-        color: Theme.of(context).colorScheme.onSurface,
+    // Всегда в одну строку: длинные дни недели просто ужимаются.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        dateLabel,
+        maxLines: 1,
+        style: TextStyle(
+          fontFamily: 'Bebas Neue Cyrillic',
+          fontSize: 40,
+          height: 1.0,
+          letterSpacing: 0.5,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
       ),
     );
   }

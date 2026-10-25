@@ -856,7 +856,7 @@ class CoachService:
         avoid_repeat = (
             f'Прошлый брифинг был таким: «{previous_insight}». Во втором предложении '
             'выбери ДРУГОЕ упражнение или другую тему, чем в прошлый раз. '
-            'Жим лёжа упоминай, только если по нему новый рекорд.\n'
+            'Не упоминай жим лёжа.\n'
             if previous_insight
             else ''
         )
@@ -894,15 +894,14 @@ class CoachService:
             max_tokens=_SHORT_MAX_TOKENS,
         )
 
-        parsed = _parse_json_object(content)
-        if parsed is not None:
-            result = {
-                'headline': str(parsed.get('headline') or 'ТРЕНИРОВКА').strip().upper(),
-                'insight': str(parsed.get('insight') or '').strip(),
-            }
-        else:
-            result = {'headline': 'ТРЕНИРОВКА', 'insight': content[:300].strip()}
-        if result['insight']:
+        parsed = _parse_json_object(content) or _salvage_json_fields(
+            content, ('headline', 'insight'),
+        )
+        headline = str(parsed.get('headline') or '').strip().upper()
+        insight = _complete_sentences(str(parsed.get('insight') or ''))
+        result = {'headline': headline or 'ТРЕНИРОВКА', 'insight': insight}
+        # Кэшируем только полноценный ответ — обрезанный перегенерируется.
+        if headline and insight:
             self._cache_put(
                 user_id=user.id, feature='daily_insight', key=cache_key,
                 content=json.dumps(result, ensure_ascii=False),
@@ -1008,10 +1007,8 @@ class CoachService:
             max_tokens=_SHORT_MAX_TOKENS,
         )
 
-        parsed = _parse_json_object(content)
-        summary = (
-            str(parsed.get('summary', '')).strip() if parsed is not None else content[:600].strip()
-        )
+        parsed = _parse_json_object(content) or _salvage_json_fields(content, ('summary',))
+        summary = _complete_sentences(str(parsed.get('summary') or ''))
         if user_id is not None and summary:
             self._cache_put(
                 user_id=user_id, feature='progress_summary', key=cache_key, content=summary,
@@ -1925,13 +1922,16 @@ class CoachService:
 # модели не принимают temperature и max_tokens). Запоминаем на время жизни
 # процесса, чтобы не тратить лишний запрос каждый раз.
 _UNSUPPORTED_PARAMS: dict[str, set[str]] = {}
+_REASONING_HEADROOM_TOKENS = 4000
 
 
 def _apply_param_fixes(model: str, payload: dict) -> None:
     for param in _UNSUPPORTED_PARAMS.get(model, ()):
         value = payload.pop(param, None)
         if param == 'max_tokens' and value is not None:
-            payload['max_completion_tokens'] = value
+            # У «рассуждающих» моделей в этот лимит входят и скрытые
+            # рассуждения — без запаса ответ обрывается на полуслове.
+            payload['max_completion_tokens'] = value + _REASONING_HEADROOM_TOKENS
 
 
 def _learn_param_fix(model: str, payload: dict, error_text: str) -> bool:
@@ -1943,6 +1943,25 @@ def _learn_param_fix(model: str, payload: dict, error_text: str) -> bool:
     _UNSUPPORTED_PARAMS.setdefault(model, set()).add(param)
     _apply_param_fixes(model, payload)
     return True
+
+
+def _salvage_json_fields(content: str, fields: tuple[str, ...]) -> dict:
+    """Достаёт строковые поля из оборванного JSON (ответ упёрся в лимит)."""
+    result = {}
+    for field in fields:
+        match = re.search(rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)', content or '')
+        if match:
+            result[field] = match.group(1).replace('\\"', '"').replace('\\n', ' ')
+    return result
+
+
+def _complete_sentences(text: str) -> str:
+    """Отрезает недописанное предложение в конце: «… В жиме л» → «…»."""
+    text = (text or '').strip()
+    if not text or text[-1] in '.!?…':
+        return text
+    cut = max(text.rfind('. '), text.rfind('! '), text.rfind('? '))
+    return text[:cut + 1].strip() if cut > 0 else ''
 
 
 def _parse_json_object(content: str) -> dict | None:
