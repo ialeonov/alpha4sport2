@@ -17,6 +17,7 @@ import 'workout_completion_sheet.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
 import '../application/workout_share_service.dart';
+import '../domain/set_target.dart';
 import '../domain/workout_metrics.dart';
 import '../../../core/utils/search.dart';
 
@@ -57,6 +58,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
       cachedHeatmapReferenceWorkouts();
   List<Map<String, dynamic>> _workoutHistory = const [];
   final Map<String, _ExerciseLastSetState> _lastSetByExerciseName = {};
+  Map<String, SetTarget> _targetsByExerciseName = const {};
 
   String? _catalogError;
   int? _workoutId;
@@ -277,6 +279,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
 
   Future<void> _loadLastSets() async {
     await _ensureWorkoutHistoryLoaded();
+    _computeTargets();
     final names = _exercises
         .map((item) => item.nameController.text.trim())
         .where((item) => item.isNotEmpty)
@@ -284,6 +287,21 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     for (final name in names) {
       await _fetchExerciseLastSet(name);
     }
+  }
+
+  /// Цели на подход по истории — те же, что во вкладке «Прогресс».
+  void _computeTargets() {
+    final templates = LocalCache.get<List>(CacheKeys.templatesCache)
+            ?.cast<Map>()
+            .map((entry) => entry.cast<String, dynamic>())
+            .toList() ??
+        const <Map<String, dynamic>>[];
+    final targets = buildSetTargets(
+      workouts: _workoutHistory,
+      templates: templates,
+      excludeWorkoutId: _workoutId,
+    );
+    if (mounted) setState(() => _targetsByExerciseName = targets);
   }
 
   Future<void> _fetchExerciseLastSet(String exerciseName) async {
@@ -599,9 +617,12 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     _restTimer.start();
   }
 
+  /// Значения для быстрого ввода: следующий подход повторяет предыдущий,
+  /// первый — цель по истории, а без неё — прошлый рабочий подход.
   ({int setNumber, double weight, int reps}) _quickEntrySeed(
     _ExerciseDraft exercise,
     _WorkingSetSummary? lastSession,
+    SetTarget? target,
   ) {
     var filled = 0;
     _SetDraft? lastFilled;
@@ -617,6 +638,9 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
         weight: _parseWeight(lastFilled.weightController.text) ?? 0,
         reps: int.tryParse(lastFilled.repsController.text) ?? 8,
       );
+    }
+    if (target != null) {
+      return (setNumber: 1, weight: target.weight, reps: target.reps);
     }
     return (
       setNumber: 1,
@@ -644,6 +668,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
     });
     _handleDraftChanged();
   }
+
+  /// «цель 82.5 × 8 · +1 повт.» над быстрым вводом.
+  String _targetHint(SetTarget target) => target.change.isEmpty
+      ? 'цель ${target.label}'
+      : 'цель ${target.label} · ${target.change}';
 
   /// « · рекорд 115 кг», если у упражнения есть рекорд в прогрессии.
   String _recordLabel(String exerciseName) {
@@ -1858,18 +1887,24 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                   if (!_isFinished && !isEmpty) ...[
                                     const SizedBox(height: 8),
                                     Builder(builder: (context) {
+                                      final target = _targetsByExerciseName[
+                                          _normalizeExerciseLookupName(
+                                              exercise.nameController.text)];
                                       final seed = _quickEntrySeed(
                                         exercise,
                                         lastSetState?.lastSet,
+                                        target,
                                       );
                                       return SetQuickEntry(
                                         key: ObjectKey(exercise),
                                         setNumber: seed.setNumber,
                                         initialWeight: seed.weight,
                                         initialReps: seed.reps,
-                                        hint: _recordLabel(
-                                                exercise.nameController.text)
-                                            .replaceFirst(' · ', ''),
+                                        hint: target != null
+                                            ? _targetHint(target)
+                                            : _recordLabel(exercise
+                                                    .nameController.text)
+                                                .replaceFirst(' · ', ''),
                                         restSeconds:
                                             RestTimerController.lastSeconds,
                                         onSubmit: (weight, reps, rpe) =>

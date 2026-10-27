@@ -45,8 +45,11 @@ class _SetQuickEntryState extends State<SetQuickEntry> {
   @override
   void didUpdateWidget(covariant SetQuickEntry oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // После записи подхода предлагаем те же значения для следующего.
-    if (oldWidget.setNumber != widget.setNumber) {
+    // После записи подхода предлагаем те же значения для следующего;
+    // цель по истории может прийти уже после первого кадра.
+    if (oldWidget.setNumber != widget.setNumber ||
+        oldWidget.initialWeight != widget.initialWeight ||
+        oldWidget.initialReps != widget.initialReps) {
       _weight.text = formatWeight(widget.initialWeight);
       _reps.text = '${widget.initialReps}';
       _rpe = null;

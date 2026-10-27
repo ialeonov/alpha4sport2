@@ -1,8 +1,10 @@
 import 'dart:math';
 
+import '../../workouts/domain/set_target.dart';
+
 /// План на сегодня без LLM: какие группы мышц дольше всего не нагружались
-/// и какие упражнения на них пользователь обычно делает — с весом и
-/// повторами из последней тренировки.
+/// и какие упражнения на них пользователь обычно делает — с целью на
+/// подход (как в тренировке) или весом и повторами прошлого раза.
 
 class PlannedGroup {
   const PlannedGroup({required this.label, required this.daysSince});
@@ -28,7 +30,7 @@ class PlannedExercise {
   final int sets;
   final int reps;
 
-  /// Рабочий вес в прошлый раз; null — упражнение с собственным весом.
+  /// Рабочий вес на сегодня; null — упражнение с собственным весом.
   final double? weight;
 }
 
@@ -104,6 +106,7 @@ TodayPlan? buildTodayPlan({
   required List<Map<String, dynamic>> workouts,
   required List<Map<String, dynamic>> exerciseCatalog,
   required DateTime now,
+  Map<String, SetTarget> targets = const {},
   int maxExercises = 5,
 }) {
   final muscleById = <int, String>{};
@@ -220,7 +223,10 @@ TodayPlan? buildTodayPlan({
 
   return TodayPlan(
     groups: groups,
-    exercises: picked.map((stats) => stats.toPlanned()).toList(),
+    exercises: picked
+        .map((stats) =>
+            stats.toPlanned(targets[normalizeExerciseName(stats.name)]))
+        .toList(),
   );
 }
 
@@ -240,16 +246,26 @@ class _ExerciseStats {
   final List<({double? weight, int reps})> lastWorkSets;
   int recentSessions = 0;
 
-  PlannedExercise toPlanned() {
+  PlannedExercise toPlanned(SetTarget? target) {
     // Ориентир — самый тяжёлый рабочий подход прошлой тренировки.
     var top = lastWorkSets.first;
     for (final set in lastWorkSets) {
       if ((set.weight ?? 0) > (top.weight ?? 0)) top = set;
     }
+    final sets = lastWorkSets.length.clamp(1, 6);
+    if (target != null) {
+      return PlannedExercise(
+        name: name,
+        catalogExerciseId: catalogExerciseId,
+        sets: sets,
+        reps: target.reps,
+        weight: target.weight,
+      );
+    }
     return PlannedExercise(
       name: name,
       catalogExerciseId: catalogExerciseId,
-      sets: lastWorkSets.length.clamp(1, 6),
+      sets: sets,
       reps: top.reps,
       weight: (top.weight ?? 0) > 0 ? top.weight : null,
     );

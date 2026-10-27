@@ -11,6 +11,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
 import '../../progression/application/progression_controller.dart';
+import '../../workouts/domain/set_target.dart';
 import '../domain/today_plan.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
 import '../../progression/presentation/gamification_widgets.dart';
@@ -96,6 +97,10 @@ class _TodayScreenState extends State<TodayScreen> {
         workouts: workouts,
         exerciseCatalog: _catalog ?? const [],
         now: now,
+        targets: buildSetTargets(
+          workouts: workouts,
+          templates: _cachedList(CacheKeys.templatesCache) ?? const [],
+        ),
       );
       _summary = _buildSummary(workouts, now);
     });
