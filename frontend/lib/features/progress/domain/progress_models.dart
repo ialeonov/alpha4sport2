@@ -68,6 +68,7 @@ class ExerciseProgressAnalysis {
     required this.reason,
     required this.sessions,
     required this.isStalled,
+    this.history = const [],
   });
 
   final String exerciseName;
@@ -77,8 +78,13 @@ class ExerciseProgressAnalysis {
   final double deltaWeight;
   final double confidenceScore;
   final String reason;
+
+  /// Последние сессии, по которым принято решение.
   final List<ExerciseSessionPerformance> sessions;
   final bool isStalled;
+
+  /// Все сессии упражнения, от старых к новым — для графика и динамики.
+  final List<ExerciseSessionPerformance> history;
 
   ExerciseSessionPerformance? get latestSession =>
       sessions.isEmpty ? null : sessions.last;

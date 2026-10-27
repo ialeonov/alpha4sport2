@@ -217,6 +217,7 @@ class ProgressAnalysisService {
         reason:
             'Нужно еще минимум ${3 - recent.length} тренировки для уверенного вывода.',
         sessions: recent,
+        history: sessions,
         isStalled: false,
       );
     }
@@ -260,6 +261,7 @@ class ProgressAnalysisService {
             ? 'Последние 3 тренировки уверенно закрывают верх диапазона ${repRange.label}, и RPE еще остается контролируемым.'
             : 'Последние 3 тренировки уверенно закрывают верх диапазона ${repRange.label}.',
         sessions: recent,
+        history: sessions,
         isStalled: false,
       );
     }
@@ -288,6 +290,7 @@ class ProgressAnalysisService {
             ? 'Повторы ниже ${repRange.lower}, сила просела, а RPE показывает, что рабочий вес стал слишком тяжелым.'
             : 'Повторы ниже ${repRange.lower}, а сила и нормализованный вес просели.',
         sessions: recent,
+        history: sessions,
         isStalled: true,
       );
     }
@@ -316,6 +319,7 @@ class ProgressAnalysisService {
       ),
       reason: reason,
       sessions: recent,
+      history: sessions,
       isStalled: isStalled,
     );
   }
