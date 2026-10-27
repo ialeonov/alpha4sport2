@@ -15,7 +15,6 @@ from app.schemas.coach import (
     CoachMemoryResponse,
     CoachWorkoutGenerateRequest,
     CoachWorkoutGenerateResponse,
-    DailyInsightResponse,
     AiUsageReport,
     OwnerCoachHistoryResponse,
     ProgressInsightsRequest,
@@ -253,22 +252,6 @@ async def generate_coach_workout(
             if payload.wellness_entries
             else None,
         )
-    except CoachServiceError as exc:
-        error_text = str(exc)
-        status_code = status.HTTP_502_BAD_GATEWAY
-        if 'не настроен' in error_text.lower():
-            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        raise HTTPException(status_code=status_code, detail=error_text) from exc
-
-
-@router.get('/daily-insight', response_model=DailyInsightResponse)
-async def daily_insight(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    service = CoachService(db)
-    try:
-        return await service.generate_daily_insight(user=current_user)
     except CoachServiceError as exc:
         error_text = str(exc)
         status_code = status.HTTP_502_BAD_GATEWAY

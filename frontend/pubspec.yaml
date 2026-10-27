@@ -51,5 +51,4 @@ flutter:
     - assets/branding/head.svg
     - assets/heatmap/body.svg
     - assets/heatmap/body_muscle_map.json
-    - assets/content/motivational_quotes.txt
     - assets/programs/

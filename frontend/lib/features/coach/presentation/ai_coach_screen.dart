@@ -8,7 +8,6 @@ import '../../../core/network/backend_api.dart';
 import '../../../core/network/backend_api_exception.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
-import '../../wellness/data/wellness_repository.dart';
 
 class AiCoachScreen extends StatefulWidget {
   const AiCoachScreen({super.key, this.initialMessage});
@@ -112,28 +111,6 @@ class _AiCoachChatState extends State<AiCoachChat>
 
   Future<void> _loadHistory() async {
     await _syncHistory();
-  }
-
-  List<Map<String, dynamic>> _collectRecentWellnessEntries() {
-    final result = <Map<String, dynamic>>[];
-    final today = DateTime.now();
-    for (var i = 0; i < 7; i++) {
-      final date = today.subtract(Duration(days: i));
-      final entry = WellnessRepository.loadForDate(date);
-      if (entry != null) {
-        final map = <String, dynamic>{
-          'date':
-              DateUtils.dateOnly(entry.date).toIso8601String().substring(0, 10),
-          'sleep': entry.sleep,
-          'energy': entry.energy,
-          'stress': entry.stress,
-          'mood': entry.mood,
-        };
-        if (entry.comment != null) map['comment'] = entry.comment;
-        result.add(map);
-      }
-    }
-    return result;
   }
 
   Future<void> _syncHistory({
@@ -240,14 +217,12 @@ class _AiCoachChatState extends State<AiCoachChat>
         )
         .map((message) => {'role': message.role, 'content': message.text})
         .toList();
-    final wellness = _collectRecentWellnessEntries();
 
     String accumulated = '';
     bool hadError = false;
 
     final stream = BackendApi.chatWithCoachStream(
       messages: apiMessages,
-      wellnessEntries: wellness,
     );
 
     _streamSubscription?.cancel();

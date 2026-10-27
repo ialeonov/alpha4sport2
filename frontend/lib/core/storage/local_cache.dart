@@ -59,6 +59,5 @@ class CacheKeys {
   static const activeWorkoutDraft = 'active_workout_draft';
   static const customPrograms = 'custom_programs';
   static const offlineMutations = 'offline_mutations';
-  static const coachDailyInsight = 'coach_daily_insight';
   static const progressInsightsCache = 'progress_insights_cache';
 }

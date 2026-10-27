@@ -814,102 +814,6 @@ class CoachService:
         except Exception:
             self.db.rollback()
 
-    async def generate_daily_insight(self, *, user: User) -> dict:
-        """Генерирует краткий ежедневный брифинг коуча для главного экрана.
-
-        Возвращает:
-            headline  — заглавие (мышцы/фокус), напр. "НОГИ И СПИНА"
-            insight   — 2-3 предложения: что делать сегодня + глобальное наблюдение
-
-        Кэшируется на сервере до конца дня или до следующей тренировки, поэтому
-        повторные открытия приложения (в т.ч. с других устройств) бесплатны.
-        """
-        today = datetime.now(_APP_TIMEZONE).date()
-        last_workout_id = self.db.scalar(
-            select(func.max(Workout.id)).where(Workout.user_id == user.id)
-        ) or 0
-        cache_key = f'{today.isoformat()}:{last_workout_id}'
-        cached = self._cache_get(
-            user_id=user.id, feature='daily_insight', key=cache_key, max_age=timedelta(hours=24),
-        )
-        if cached:
-            try:
-                return json.loads(cached)
-            except json.JSONDecodeError:
-                pass
-
-        context = _compact_context_for_llm(self._build_context_summary(user), max_workouts=5)
-
-        # Прошлый брифинг (лежит в кэше под старым ключом) — чтобы модель не
-        # повторяла одно и то же наблюдение день за днём.
-        previous_row = self.db.scalar(
-            select(AiResponseCache).where(
-                AiResponseCache.user_id == user.id,
-                AiResponseCache.feature == 'daily_insight',
-            )
-        )
-        previous_insight = ''
-        if previous_row is not None:
-            previous_insight = str(
-                (_parse_json_object(previous_row.content) or {}).get('insight') or ''
-            )[:400]
-        avoid_repeat = (
-            f'Прошлый брифинг был таким: «{previous_insight}». Во втором предложении '
-            'выбери ДРУГОЕ упражнение или другую тему, чем в прошлый раз.\n'
-            if previous_insight
-            else ''
-        ) + 'Не упоминай жим лёжа — пользователь просил не возвращаться к нему.\n'
-
-        system_msg = (
-            f'Ты персональный фитнес-коуч приложения "{_APP_DISPLAY_NAME}". '
-            f'Сегодня {today.isoformat()}. '
-            'На основе данных пользователя напиши КРАТКИЙ ежедневный брифинг — '
-            'ровно 2 предложения на русском языке.\n\n'
-            'Предложение 1: какие мышечные группы стоит потренировать сегодня и почему '
-            '(используй muscleDistribution: давность и effectiveSets7d — недельный объём; '
-            'ориентир для роста 10–20 эффективных подходов на мышцу в неделю).\n'
-            'Предложение 2: одно ГЛОБАЛЬНОЕ наблюдение о тренировочном процессе пользователя — '
-            'прогресс или застой в упражнении (бери любое из progressionTrends и recentWorkouts, '
-            'не обязательно самое тяжёлое), накопленная усталость, стрик, '
-            'дисбаланс групп мышц, или что-то значимое из истории. '
-            'Используй конкретные цифры. Не давай общих советов.\n'
-            f'{avoid_repeat}\n'
-            'Также выдели headline — 1-3 слова заглавными буквами (мышечные группы или тема дня), '
-            'напр. "НОГИ И СПИНА", "ГРУДЬ", "ДЕНЬ ОТДЫХА", "РЕКОРД БЛИЗКО".\n\n'
-            'Верни строго валидный JSON без markdown:\n'
-            '{"headline": "...", "insight": "..."}'
-        )
-        user_msg = f'Данные пользователя:\n{json.dumps(context, ensure_ascii=False)}'
-
-        content, _ = await self._request_completion(
-            messages=[
-                {'role': 'system', 'content': system_msg},
-                {'role': 'user', 'content': user_msg},
-            ],
-            temperature=0.6,
-            feature='daily_insight',
-            user_id=user.id,
-            light=True,
-            max_tokens=_SHORT_MAX_TOKENS,
-        )
-
-        parsed = _parse_json_object(content) or _salvage_json_fields(
-            content, ('headline', 'insight'),
-        )
-        headline = str(parsed.get('headline') or '').strip().upper()
-        insight = _drop_sentences_about(
-            _complete_sentences(str(parsed.get('insight') or '')),
-            ('жим лёж', 'жим леж', 'жиме лёж', 'жиме леж'),
-        )
-        result = {'headline': headline or 'ТРЕНИРОВКА', 'insight': insight}
-        # Кэшируем только полноценный ответ — обрезанный перегенерируется.
-        if headline and insight:
-            self._cache_put(
-                user_id=user.id, feature='daily_insight', key=cache_key,
-                content=json.dumps(result, ensure_ascii=False),
-            )
-        return result
-
     async def generate_progress_insights(
         self,
         exercises: list[dict],
@@ -1955,14 +1859,6 @@ def _salvage_json_fields(content: str, fields: tuple[str, ...]) -> dict:
         if match:
             result[field] = match.group(1).replace('\\"', '"').replace('\\n', ' ')
     return result
-
-
-def _drop_sentences_about(text: str, markers: tuple[str, ...]) -> str:
-    """Убирает предложения с темами, к которым пользователь просил не
-    возвращаться (страховка, если модель нарушила инструкцию)."""
-    sentences = re.split(r'(?<=[.!?…])\s+', text or '')
-    kept = [s for s in sentences if not any(m in s.lower() for m in markers)]
-    return ' '.join(kept).strip()
 
 
 def _complete_sentences(text: str) -> str:

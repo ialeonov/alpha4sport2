@@ -102,8 +102,6 @@ class BackendApi {
           throw const BackendApiException('Название упражнения обязательно.');
         case 'Body entry not found':
           throw const BackendApiException('Запись параметров тела не найдена.');
-        case 'Wellness entry not found':
-          throw const BackendApiException('Запись самочувствия не найдена.');
         case 'Больничный не найден.':
           throw const BackendApiException('Больничный не найден.');
         case 'В этом месяце уже использован доступный больничный эпизод.':
@@ -256,62 +254,6 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось зарегистрироваться.');
-    }
-  }
-
-  static String _dateOnlyParam(DateTime date) {
-    final local = DateTime(date.year, date.month, date.day);
-    return local.toIso8601String().substring(0, 10);
-  }
-
-  static Future<List<Map<String, dynamic>>> getWellnessEntries({
-    DateTime? start,
-    DateTime? end,
-  }) async {
-    try {
-      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response = await dio.get(
-        '/api/v1/wellness',
-        queryParameters: {
-          if (start != null) 'start': _dateOnlyParam(start),
-          if (end != null) 'end': _dateOnlyParam(end),
-        },
-      );
-      return (response.data as List).cast<Map<String, dynamic>>();
-    } on DioException catch (error) {
-      _throwFriendlyError(
-        error,
-        defaultMessage: 'Не удалось загрузить самочувствие.',
-      );
-    }
-  }
-
-  static Future<Map<String, dynamic>> upsertWellnessEntry({
-    required DateTime date,
-    required int sleep,
-    required int energy,
-    required int stress,
-    required int mood,
-    String? comment,
-  }) async {
-    try {
-      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response = await dio.put(
-        '/api/v1/wellness/${_dateOnlyParam(date)}',
-        data: {
-          'sleep': sleep,
-          'energy': energy,
-          'stress': stress,
-          'mood': mood,
-          'comment': comment,
-        },
-      );
-      return (response.data as Map).cast<String, dynamic>();
-    } on DioException catch (error) {
-      _throwFriendlyError(
-        error,
-        defaultMessage: 'Не удалось сохранить самочувствие.',
-      );
     }
   }
 
@@ -943,7 +885,6 @@ class BackendApi {
   static Future<Map<String, dynamic>> chatWithCoach({
     required List<Map<String, String>> messages,
     bool saveHistory = true,
-    List<Map<String, dynamic>>? wellnessEntries,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -952,8 +893,6 @@ class BackendApi {
         data: {
           'messages': messages,
           'save_history': saveHistory,
-          if (wellnessEntries != null && wellnessEntries.isNotEmpty)
-            'wellness_entries': wellnessEntries,
         },
       );
       return (response.data as Map).cast<String, dynamic>();
@@ -968,7 +907,6 @@ class BackendApi {
   static Stream<String> chatWithCoachStream({
     required List<Map<String, String>> messages,
     bool saveHistory = true,
-    List<Map<String, dynamic>>? wellnessEntries,
   }) {
     final controller = StreamController<String>();
 
@@ -982,8 +920,6 @@ class BackendApi {
           data: {
             'messages': messages,
             'save_history': saveHistory,
-            if (wellnessEntries != null && wellnessEntries.isNotEmpty)
-              'wellness_entries': wellnessEntries,
           },
           options: Options(
             responseType: ResponseType.stream,
@@ -1063,7 +999,6 @@ class BackendApi {
     required int minExercises,
     required int maxExercises,
     String? userNotes,
-    List<Map<String, dynamic>>? wellnessEntries,
   }) async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
@@ -1075,8 +1010,6 @@ class BackendApi {
           'max_exercises': maxExercises,
           if (userNotes != null && userNotes.isNotEmpty)
             'user_notes': userNotes,
-          if (wellnessEntries != null && wellnessEntries.isNotEmpty)
-            'wellness_entries': wellnessEntries,
         },
       );
       return (response.data as Map).cast<String, dynamic>();
@@ -1232,19 +1165,6 @@ class BackendApi {
         error,
         defaultMessage: 'Не удалось очистить историю AI - коуча.',
       );
-    }
-  }
-
-  /// Запрашивает ежедневный брифинг коуча для главного экрана.
-  /// Возвращает {headline, insight} или null при ошибке/недоступности.
-  static Future<Map<String, dynamic>?> getDailyInsight() async {
-    try {
-      final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
-      final response = await dio.get('/api/v1/coach/daily-insight');
-      return (response.data as Map).cast<String, dynamic>();
-    } on DioException {
-      // Опциональная фича — не блокируем экран при ошибке
-      return null;
     }
   }
 

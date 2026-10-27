@@ -12,9 +12,6 @@ import '../../heatmap/domain/muscle_heatmap_color_resolver.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
 import '../../progression/application/progression_controller.dart';
-import '../../wellness/data/wellness_repository.dart';
-import '../../wellness/domain/wellness_entry.dart';
-import '../../wellness/presentation/wellness_widgets.dart';
 import '../../workouts/application/workout_export_service.dart';
 import '../../workouts/application/workout_share_service.dart';
 import '../../workouts/domain/workout_metrics.dart';
@@ -63,7 +60,6 @@ class CalendarScreenState extends State<CalendarScreen> {
   late Future<List<Map<String, dynamic>>> _catalogFuture;
   late DateTime _displayedMonth;
   late DateTime _selectedDay;
-  int _wellnessVersion = 0;
   final WorkoutExportService _workoutExportService =
       const WorkoutExportService();
 
@@ -89,7 +85,6 @@ class CalendarScreenState extends State<CalendarScreen> {
     _catalogFuture = _loadExerciseCatalog();
     unawaited(_loadAllDays());
     unawaited(_loadMonth(_displayedMonth));
-    unawaited(_syncDisplayedMonthWellness());
   }
 
   Future<void> _loadAllDays() async {
@@ -140,7 +135,6 @@ class CalendarScreenState extends State<CalendarScreen> {
     await Future.wait([
       _loadAllDays(),
       _loadMonth(_displayedMonth),
-      _syncDisplayedMonthWellness(),
     ]);
   }
 
@@ -832,27 +826,6 @@ class CalendarScreenState extends State<CalendarScreen> {
           DateTime(_displayedMonth.year, _displayedMonth.month + delta);
     });
     unawaited(_loadMonth(_displayedMonth));
-    unawaited(_syncDisplayedMonthWellness());
-  }
-
-  Future<void> _syncDisplayedMonthWellness() async {
-    final start = DateTime(_displayedMonth.year, _displayedMonth.month);
-    final end = DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0);
-    try {
-      await WellnessRepository.syncRange(start: start, end: end);
-      if (mounted) setState(() => _wellnessVersion++);
-    } catch (_) {
-      // Calendar can still render cached wellness colors offline.
-    }
-  }
-
-  Map<DateTime, WellnessZone> _loadWellnessZones(List<DateTime> dates) {
-    final zones = <DateTime, WellnessZone>{};
-    for (final date in dates) {
-      final entry = WellnessRepository.loadForDate(date);
-      if (entry != null) zones[date] = entry.zone;
-    }
-    return zones;
   }
 
   DateTime? _parseWorkoutDay(Map<String, dynamic> workout) {
@@ -881,7 +854,6 @@ class CalendarScreenState extends State<CalendarScreen> {
     bool compact,
     List<Map<String, dynamic>> allWorkouts,
     List<Map<String, dynamic>> exerciseCatalog,
-    Map<DateTime, WellnessZone> wellnessZones,
   ) {
     final first = DateTime(_displayedMonth.year, _displayedMonth.month, 1);
     final daysInMonth =
@@ -903,7 +875,6 @@ class CalendarScreenState extends State<CalendarScreen> {
       final dayWorkouts = byDay[date] ?? const <Map<String, dynamic>>[];
       final hasWorkouts =
           dayWorkouts.isNotEmpty || _workoutDays.contains(date);
-      final wellnessZone = wellnessZones[date];
       final isSelected = DateUtils.isSameDay(date, _selectedDay);
       final isToday = DateUtils.isSameDay(date, DateTime.now());
       cellDates.add(date);
@@ -919,9 +890,7 @@ class CalendarScreenState extends State<CalendarScreen> {
               borderRadius: BorderRadius.circular(compact ? 10 : 12),
               color: isSelected
                   ? scheme.primary
-                  : wellnessZone != null
-                      ? wellnessZoneCellColor(wellnessZone)
-                      : hasWorkouts
+                  : hasWorkouts
                           ? scheme.primaryContainer.withValues(
                               alpha: scheme.brightness == Brightness.dark
                                   ? 0.22
@@ -1108,20 +1077,6 @@ class CalendarScreenState extends State<CalendarScreen> {
           builder: (context, catalogSnapshot) {
             final exerciseCatalog = catalogSnapshot.data ?? const [];
 
-            final daysInMonth =
-                DateTime(_displayedMonth.year, _displayedMonth.month + 1, 0)
-                    .day;
-            final monthDates = List.generate(
-              daysInMonth,
-              (i) =>
-                  DateTime(_displayedMonth.year, _displayedMonth.month, i + 1),
-            );
-            final wellnessZones = _wellnessVersion >= 0
-                ? _loadWellnessZones(monthDates)
-                : const <DateTime, WellnessZone>{};
-            final selectedDayWellness =
-                WellnessRepository.loadForDate(_selectedDay);
-
             return RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView(
@@ -1244,7 +1199,6 @@ class CalendarScreenState extends State<CalendarScreen> {
                                     compactCalendar,
                                     workouts,
                                     exerciseCatalog,
-                                    wellnessZones,
                                   ),
                                 ],
                               ),
@@ -1566,15 +1520,6 @@ class CalendarScreenState extends State<CalendarScreen> {
                         },
                       ),
                       SizedBox(height: compactCalendar ? 4 : 8),
-                      DashboardSectionLabel('Самочувствие'),
-                      const SizedBox(height: 8),
-                      WellnessCard(
-                        entry: selectedDayWellness,
-                        date: _selectedDay,
-                        onChanged: () => setState(() => _wellnessVersion++),
-                        emptyLabel: 'Добавить самочувствие',
-                      ),
-                      SizedBox(height: compactCalendar ? 8 : 12),
                       if (compactCalendar)
                         Row(
                           children: [

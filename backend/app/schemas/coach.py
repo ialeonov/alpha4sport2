@@ -117,13 +117,6 @@ class ProgressInsightsResponse(BaseModel):
     summary: str
 
 
-# ── Daily insight ─────────────────────────────────────────────────────────────
-
-class DailyInsightResponse(BaseModel):
-    headline: str
-    insight: str
-
-
 # ── Coach memory ──────────────────────────────────────────────────────────────
 
 class CoachMemoryEntry(BaseModel):

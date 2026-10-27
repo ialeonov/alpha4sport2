@@ -10,11 +10,8 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
-import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../progression/application/progression_controller.dart';
-import '../../wellness/data/wellness_repository.dart';
-import '../../wellness/domain/wellness_entry.dart';
-import '../../wellness/presentation/wellness_widgets.dart';
+import '../domain/today_plan.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
 import '../../progression/presentation/gamification_widgets.dart';
 
@@ -29,13 +26,11 @@ class _TodayScreenState extends State<TodayScreen> {
   static const int _defaultWeeklyTarget = 3;
 
   Map<String, dynamic>? _draftWorkout;
-  _MotivationQuote? _motivationQuote;
-  _TodayFocus? _todayFocus;
+  List<Map<String, dynamic>>? _workouts;
+  List<Map<String, dynamic>>? _catalog;
+  TodayPlan? _plan;
   _TodaySummary _summary = const _TodaySummary.empty();
-  WellnessEntry? _todayWellness;
-  _DailyInsight? _dailyInsight;
   int _weeklyTargetFromProfile = _defaultWeeklyTarget;
-  bool _draftLoading = true;
   bool _templatesLoading = false;
   bool _aiCoachLoading = false;
 
@@ -46,105 +41,98 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<void> _refreshScreen() async {
+    _catalog ??= _cachedList(CacheKeys.exerciseCatalogCache);
+    final cached = _cachedList(CacheKeys.workoutsCache);
+    if (cached != null && cached.isNotEmpty) {
+      _applyWorkouts(cached);
+      // Черновик показываем сразу; удалять его по устаревшему кэшу нельзя.
+      unawaited(_loadDraft(cached, fromServer: false));
+    }
+
     await Future.wait([
-      _loadTodayWellness(),
-      _loadDraft(),
-      _loadMotivationQuote(),
-      _loadFitnessProfile().then((_) => _loadSummary()),
-      _loadTodayFocus(),
+      _loadFitnessProfile(),
+      _loadCatalog(),
+      _loadWorkouts(),
     ]);
-    // Инсайт обновляется в фоне — не блокирует основной экран
-    unawaited(_loadDailyInsight());
+    // Профиль и каталог могли прийти позже истории — пересчитываем.
+    final workouts = _workouts;
+    if (workouts != null) _applyWorkouts(workouts);
   }
 
-  /// Загружает брифинг коуча с кэшированием на 6 часов.
-  /// При наличии кэша показывает его мгновенно, обновляет в фоне.
-  Future<void> _loadDailyInsight() async {
-    // 1. Мгновенно показываем кэш если есть
-    final cached = LocalCache.get<Map>(CacheKeys.coachDailyInsight);
-    if (cached != null) {
-      final cachedAt = cached['cached_at'] as int?;
-      final headline = cached['headline'] as String?;
-      final insight = cached['insight'] as String?;
-      // Старые версии могли сохранить обрезанный JSON — такой кэш игнорируем.
-      if (headline != null && insight != null && !_isBrokenInsight(insight)) {
-        if (mounted) {
-          setState(() => _dailyInsight = _DailyInsight(
-                headline: headline,
-                insight: insight,
-              ));
-        }
-        // Кэш актуален если он за сегодня — обновляем только после полуночи
-        if (cachedAt != null) {
-          final cachedDay = DateTime.fromMillisecondsSinceEpoch(cachedAt);
-          final today = DateTime.now();
-          final isSameDay = cachedDay.year == today.year &&
-              cachedDay.month == today.month &&
-              cachedDay.day == today.day;
-          if (isSameDay) return;
-        }
-      }
-    }
+  List<Map<String, dynamic>>? _cachedList(String key) {
+    return LocalCache.get<List>(key)
+        ?.cast<Map>()
+        .map((entry) => entry.cast<String, dynamic>())
+        .toList();
+  }
 
-    // 2. Запрашиваем свежий инсайт
+  /// История загружается один раз на весь экран: неделя, план и черновик
+  /// считаются из неё.
+  Future<void> _loadWorkouts() async {
+    List<Map<String, dynamic>>? workouts;
     try {
-      final data = await BackendApi.getDailyInsight();
-      if (!mounted || data == null) return;
-      final headline = (data['headline'] as String?)?.trim() ?? '';
-      final insight = (data['insight'] as String?)?.trim() ?? '';
-      if ((headline.isEmpty && insight.isEmpty) || _isBrokenInsight(insight)) {
-        return;
-      }
-      await LocalCache.put(CacheKeys.coachDailyInsight, {
-        'headline': headline,
-        'insight': insight,
-        'cached_at': DateTime.now().millisecondsSinceEpoch,
-      });
-      if (mounted) {
-        setState(() => _dailyInsight = _DailyInsight(
-              headline: headline,
-              insight: insight,
-            ));
-      }
+      workouts = await BackendApi.getWorkouts();
     } catch (_) {
-      // Не блокируем экран — инсайт опциональный
+      workouts = _cachedList(CacheKeys.workoutsCache);
     }
+    if (!mounted) return;
+    _applyWorkouts(workouts ?? const []);
+    await _loadDraft(workouts ?? const [], fromServer: true);
   }
 
-  static bool _isBrokenInsight(String insight) =>
-      insight.trimLeft().startsWith('{') || insight.contains('"headline"');
-
-  Future<void> _loadTodayWellness() async {
-    final entry = WellnessRepository.loadForDate(DateTime.now());
-    if (mounted) setState(() => _todayWellness = entry);
+  Future<void> _loadCatalog() async {
+    if (_catalog != null && _catalog!.isNotEmpty) return;
     try {
-      final syncedEntry = await WellnessRepository.fetchForDate(DateTime.now());
-      if (mounted) setState(() => _todayWellness = syncedEntry);
-    } catch (_) {
-      // Keep the local cache visible when the server is temporarily unavailable.
-    }
+      _catalog = await BackendApi.getExercises();
+    } catch (_) {}
   }
 
-  List<Map<String, dynamic>> _collectRecentWellnessEntries() {
-    final result = <Map<String, dynamic>>[];
-    final today = DateTime.now();
-    for (var i = 0; i < 7; i++) {
-      final date = today.subtract(Duration(days: i));
-      final entry = WellnessRepository.loadForDate(date);
-      if (entry != null) {
-        final map = <String, dynamic>{
-          'date':
-              DateUtils.dateOnly(entry.date).toIso8601String().substring(0, 10),
-          'sleep': entry.sleep,
-          'energy': entry.energy,
-          'stress': entry.stress,
-          'mood': entry.mood,
-        };
-        if (entry.comment != null) map['comment'] = entry.comment;
-        result.add(map);
+  void _applyWorkouts(List<Map<String, dynamic>> workouts) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    setState(() {
+      _workouts = workouts;
+      _plan = buildTodayPlan(
+        workouts: workouts,
+        exerciseCatalog: _catalog ?? const [],
+        now: now,
+      );
+      _summary = _buildSummary(workouts, now);
+    });
+  }
+
+  _TodaySummary _buildSummary(
+    List<Map<String, dynamic>> workouts,
+    DateTime now,
+  ) {
+    final weekStart = DateUtils.dateOnly(
+      now.subtract(Duration(days: now.weekday - 1)),
+    );
+    final weekEnd = weekStart.add(const Duration(days: 7));
+
+    var weekCount = 0;
+    final activeDateSet = <DateTime>{};
+    final activeWeekdaySet = <int>{};
+    for (final workout in workouts) {
+      final startedAt =
+          DateTime.tryParse((workout['started_at'] ?? '').toString())
+              ?.toLocal();
+      if (startedAt == null ||
+          startedAt.isBefore(weekStart) ||
+          !startedAt.isBefore(weekEnd)) {
+        continue;
       }
+      weekCount++;
+      activeDateSet.add(DateUtils.dateOnly(startedAt));
+      activeWeekdaySet.add(startedAt.weekday);
     }
-    return result;
+
+    return _TodaySummary(
+      weekCount: weekCount,
+      activeDays: activeDateSet.length,
+      weeklyTarget: max(_weeklyTargetFromProfile, weekCount),
+      activeWeekdays: activeWeekdaySet,
+    );
   }
 
   Future<void> _loadFitnessProfile() async {
@@ -157,180 +145,10 @@ class _TodayScreenState extends State<TodayScreen> {
     } catch (_) {}
   }
 
-  Future<void> _loadTodayFocus() async {
-    try {
-      final results = await Future.wait([
-        _loadWorkoutsForAiCoach().catchError((_) => <Map<String, dynamic>>[]),
-        _loadExerciseCatalogForAiCoach()
-            .catchError((_) => <Map<String, dynamic>>[]),
-        BackendApi.getFitnessProfile().catchError((_) => <String, dynamic>{}),
-      ]);
-
-      final workouts = results[0] as List<Map<String, dynamic>>;
-      final exerciseCatalog = results[1] as List<Map<String, dynamic>>;
-      final profile = results[2] as Map<String, dynamic>;
-
-      final goals =
-          ((profile['goals'] as List?)?.cast<String>()) ?? const <String>[];
-      final gender = profile['gender'] as String?;
-
-      final now = DateTime.now();
-      final weekStart = DateUtils.dateOnly(
-        now.subtract(Duration(days: now.weekday - 1)),
-      );
-      final weekEnd = weekStart.add(const Duration(days: 7));
-      final thisWeek = workouts.where((workout) {
-        final startedAt =
-            DateTime.tryParse((workout['started_at'] ?? '').toString())
-                ?.toLocal();
-        return startedAt != null &&
-            !startedAt.isBefore(weekStart) &&
-            startedAt.isBefore(weekEnd);
-      }).toList();
-
-      if (!mounted) return;
-
-      if (thisWeek.isEmpty) {
-        final lastWeekStart = weekStart.subtract(const Duration(days: 7));
-        final lastWeekCount = workouts.where((w) {
-          final startedAt =
-              DateTime.tryParse((w['started_at'] ?? '').toString())?.toLocal();
-          return startedAt != null &&
-              !startedAt.isBefore(lastWeekStart) &&
-              startedAt.isBefore(weekStart);
-        }).length;
-
-        final headline = _goalMotivationHeadline(goals);
-        final subtext = lastWeekCount > 0
-            ? 'На прошлой неделе: $lastWeekCount ${_workoutsPlural(lastWeekCount)}'
-            : null;
-
-        setState(() => _todayFocus = _TodayFocus.startOfWeek(
-              motivationHeadline: headline,
-              motivationSubtext: subtext,
-            ));
-        return;
-      }
-
-      final tier1 = _buildTier1Muscles(gender: gender, goals: goals);
-
-      final candidateMuscles = <String>{};
-      for (final exercise in exerciseCatalog) {
-        final primary = (exercise['primary_muscle'] ?? '').toString().trim();
-        if (primary.isNotEmpty && !_excludedMuscles.contains(primary)) {
-          candidateMuscles.add(primary);
-        }
-      }
-
-      if (candidateMuscles.isEmpty || !mounted) return;
-
-      final rawLoads = const MuscleLoadCalculator().calculate(
-        workouts: thisWeek,
-        exerciseCatalog: exerciseCatalog,
-      );
-
-      final eligibleMuscles =
-          candidateMuscles.where((m) => _muscleTier(m, tier1) <= 3).toList()
-            ..sort((a, b) {
-              final tA = _muscleTier(a, tier1);
-              final tB = _muscleTier(b, tier1);
-              if (tA != tB) return tA.compareTo(tB);
-              return (rawLoads[a] ?? 0).compareTo(rawLoads[b] ?? 0);
-            });
-
-      if (!mounted) return;
-
-      final recommendedLabel =
-          _buildRecommendedLabel(eligibleMuscles.take(4).toList());
-
-      setState(() {
-        _todayFocus =
-            _TodayFocus.recommendation(recommendedLabel: recommendedLabel);
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _loadMotivationQuote() async {
-    try {
-      final rawQuotes =
-          await rootBundle.loadString('assets/content/motivational_quotes.txt');
-      final parsedQuotes = rawQuotes
-          .split('\n')
-          .map((line) => line.trim())
-          .where((line) => line.isNotEmpty)
-          .map(_MotivationQuote.tryParse)
-          .whereType<_MotivationQuote>()
-          .toList();
-      if (!mounted || parsedQuotes.isEmpty) {
-        return;
-      }
-
-      final random = Random();
-      setState(() {
-        _motivationQuote = parsedQuotes[random.nextInt(parsedQuotes.length)];
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _loadSummary() async {
-    List<Map<String, dynamic>> workouts =
-        LocalCache.get<List>(CacheKeys.workoutsCache)
-                ?.cast<Map>()
-                .map((entry) => entry.cast<String, dynamic>())
-                .toList() ??
-            const [];
-
-    if (workouts.isEmpty) {
-      try {
-        workouts = await BackendApi.getWorkouts();
-      } catch (_) {}
-    }
-
-    final now = DateTime.now();
-    final weekStart = DateUtils.dateOnly(
-      now.subtract(Duration(days: now.weekday - 1)),
-    );
-    final weekEnd = weekStart.add(const Duration(days: 7));
-
-    final thisWeek = workouts.where((workout) {
-      final startedAt =
-          DateTime.tryParse((workout['started_at'] ?? '').toString())
-              ?.toLocal();
-      return startedAt != null &&
-          !startedAt.isBefore(weekStart) &&
-          startedAt.isBefore(weekEnd);
-    }).toList();
-
-    final activeDateSet = <DateTime>{};
-    final activeWeekdaySet = <int>{};
-    for (final workout in thisWeek) {
-      final startedAt =
-          DateTime.tryParse((workout['started_at'] ?? '').toString())
-              ?.toLocal();
-      if (startedAt != null) {
-        activeDateSet.add(DateUtils.dateOnly(startedAt));
-        activeWeekdaySet.add(startedAt.weekday);
-      }
-    }
-
-    final activeDays = activeDateSet.length;
-    final weeklyTarget = max(_weeklyTargetFromProfile, thisWeek.length);
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _summary = _TodaySummary(
-        weekCount: thisWeek.length,
-        activeDays: activeDays,
-        weeklyTarget: weeklyTarget,
-        activeWeekdays: activeWeekdaySet,
-      );
-    });
-  }
-
-  Future<void> _loadDraft() async {
+  Future<void> _loadDraft(
+    List<Map<String, dynamic>> workouts, {
+    required bool fromServer,
+  }) async {
     final activeDraftKey = LocalCache.get<String>(CacheKeys.activeWorkoutDraft);
     Map<String, dynamic>? draftWorkout;
     if (activeDraftKey != null) {
@@ -347,78 +165,32 @@ class _TodayScreenState extends State<TodayScreen> {
       }
     }
 
-    // Fallback: ищем незавершённую тренировку в кэше/API,
-    // если локальный черновик не нашли
-    draftWorkout ??= await _findUnfinishedWorkout();
-
-    draftWorkout = await _pruneOrphanedDraft(
-      draftWorkout: draftWorkout,
-      activeDraftKey: activeDraftKey,
-    );
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _draftWorkout = draftWorkout;
-      _draftLoading = false;
-    });
-  }
-
-  Future<Map<String, dynamic>?> _findUnfinishedWorkout() async {
-    try {
-      // Всегда берём свежие данные с сервера, чтобы не показывать черновик
-      // уже завершённой тренировки из устаревшего кэша.
-      final workouts = await BackendApi.getWorkouts();
-      // Берём самую свежую незавершённую тренировку
-      final unfinished =
-          workouts.where((w) => w['finished_at'] == null).toList();
-      if (unfinished.isEmpty) return null;
-      return unfinished.last;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<Map<String, dynamic>?> _pruneOrphanedDraft({
-    required Map<String, dynamic>? draftWorkout,
-    required String? activeDraftKey,
-  }) async {
-    if (draftWorkout == null || activeDraftKey == null) {
-      return draftWorkout;
+    // Локального черновика нет — берём самую свежую незавершённую
+    // тренировку с сервера.
+    if (draftWorkout == null) {
+      final unfinished = workouts
+          .where((w) => w['finished_at'] == null)
+          .toList()
+        ..sort((a, b) => (b['started_at'] ?? '')
+            .toString()
+            .compareTo((a['started_at'] ?? '').toString()));
+      draftWorkout = unfinished.firstOrNull;
     }
 
-    final draftWorkoutId = draftWorkout['id'] as int?;
-    if (draftWorkoutId == null) {
-      return draftWorkout;
+    // Черновик тренировки, которую уже удалили на сервере, не показываем.
+    final draftWorkoutId = draftWorkout?['id'] as int?;
+    if (fromServer &&
+        activeDraftKey != null &&
+        draftWorkoutId != null &&
+        workouts.isNotEmpty &&
+        !workouts.any((item) => item['id'] == draftWorkoutId)) {
+      await LocalCache.remove(activeDraftKey);
+      await LocalCache.remove(CacheKeys.activeWorkoutDraft);
+      draftWorkout = null;
     }
 
-    var knownWorkouts = LocalCache.get<List>(CacheKeys.workoutsCache)
-            ?.cast<Map>()
-            .map((entry) => entry.cast<String, dynamic>())
-            .toList() ??
-        const <Map<String, dynamic>>[];
-
-    var exists = knownWorkouts.any((item) => item['id'] == draftWorkoutId);
-
-    if (!exists) {
-      // Кэш может быть устаревшим (например, тренировка только что создана).
-      // Всегда перепроверяем через API, прежде чем удалять черновик.
-      try {
-        knownWorkouts = await BackendApi.getWorkouts();
-        exists = knownWorkouts.any((item) => item['id'] == draftWorkoutId);
-      } catch (_) {
-        return draftWorkout;
-      }
-    }
-
-    if (exists) {
-      return draftWorkout;
-    }
-
-    await LocalCache.remove(activeDraftKey);
-    await LocalCache.remove(CacheKeys.activeWorkoutDraft);
-    return null;
+    if (!mounted) return;
+    setState(() => _draftWorkout = draftWorkout);
   }
 
   Future<void> _deleteDraft() async {
@@ -477,6 +249,19 @@ class _TodayScreenState extends State<TodayScreen> {
     if (mounted) {
       await _refreshScreen();
     }
+  }
+
+  Future<void> _startPlan() async {
+    final plan = _plan;
+    if (plan == null) {
+      await _openWorkout(date: DateTime.now());
+      return;
+    }
+    await _openWorkout(
+      date: DateTime.now(),
+      name: plan.workoutName,
+      exercises: plan.toWorkoutExercises(),
+    );
   }
 
   Future<void> _startFromTemplate() async {
@@ -543,7 +328,7 @@ class _TodayScreenState extends State<TodayScreen> {
         return;
       }
 
-      final workouts = await BackendApi.getWorkouts();
+      final workouts = _workouts ?? await BackendApi.getWorkouts();
       if (!mounted) {
         return;
       }
@@ -674,7 +459,6 @@ class _TodayScreenState extends State<TodayScreen> {
         minExercises: intensity.minExercises,
         maxExercises: intensity.maxExercises,
         userNotes: userNotes.isEmpty ? null : userNotes,
-        wellnessEntries: _collectRecentWellnessEntries(),
       );
       final reply = (response['reply'] ?? '').toString().trim();
       final plan = _decodeAiCoachWorkoutPlan(reply);
@@ -809,6 +593,8 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _loadWorkoutsForAiCoach() async {
+    final loaded = _workouts;
+    if (loaded != null) return loaded;
     final cached = LocalCache.get<List>(CacheKeys.workoutsCache);
     if (cached != null) {
       return cached
@@ -820,6 +606,8 @@ class _TodayScreenState extends State<TodayScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _loadExerciseCatalogForAiCoach() async {
+    final loaded = _catalog;
+    if (loaded != null && loaded.isNotEmpty) return loaded;
     final cached = LocalCache.get<List>(CacheKeys.exerciseCatalogCache);
     if (cached != null) {
       return cached
@@ -1034,93 +822,41 @@ class _TodayScreenState extends State<TodayScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final showQuote =
-        _motivationQuote != null && !_draftLoading && _draftWorkout == null;
-    final height = MediaQuery.sizeOf(context).height;
-    final isTall = height >= 760;
+    final draft = _draftWorkout;
     return AppBackdrop(
       child: RefreshIndicator(
         onRefresh: _refreshScreen,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final verticalPadding = EdgeInsets.fromLTRB(
-              16,
-              isTall ? 18 : 12,
-              16,
-              isTall ? 48 : 96,
-            );
-            final minContentHeight = max(
-              0.0,
-              constraints.maxHeight -
-                  verticalPadding.top -
-                  verticalPadding.bottom,
-            );
-
-            return SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: verticalPadding,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: minContentHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _TodayHeadline(dateLabel: _todayDateLabel(today)),
-                      SizedBox(height: isTall ? 16 : 10),
-                      _WorkoutDayCard(
-                        headline: _dailyInsight?.headline.isNotEmpty == true
-                            ? _dailyInsight!.headline
-                            : (_todayFocus != null &&
-                                    !_todayFocus!.isStartState)
-                                ? _todayFocus!.recommendedLabel
-                                : _todayFocus?.motivationHeadline,
-                        focus: _todayFocus,
-                        dailyInsight: _dailyInsight,
-                        templatesLoading: _templatesLoading,
-                        aiCoachLoading: _aiCoachLoading,
-                        onStartWorkout: () =>
-                            _openWorkout(date: DateTime.now()),
-                        onStartTemplate: _startFromTemplate,
-                        onStartAiCoach: _startFromAiCoach,
-                      ),
-                      const SizedBox(height: 10),
-                      _WeekSummaryCard(summary: _summary),
-                      const SizedBox(height: 10),
-                      const _NextGoalCard(),
-                      WellnessCard(
-                        entry: _todayWellness,
-                        date: DateUtils.dateOnly(DateTime.now()),
-                        onChanged: () => unawaited(_loadTodayWellness()),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_draftLoading)
-                        const DashboardCard(
-                          child: Padding(
-                            padding: EdgeInsets.all(20),
-                            child: Center(child: CircularProgressIndicator()),
-                          ),
-                        )
-                      else if (_draftWorkout != null)
-                        _DraftCard(
-                          draftWorkout: _draftWorkout!,
-                          onOpenDraft: () =>
-                              _openWorkout(workout: _draftWorkout),
-                          onDelete: _deleteDraft,
-                        ),
-                      if (showQuote) const Spacer(flex: 2) else const Spacer(),
-                      if (showQuote) ...[
-                        _TodayQuote(
-                          quote: _motivationQuote!.quote,
-                          author: _motivationQuote!.author,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          children: [
+            _TodayHeadline(dateLabel: _todayDateLabel(DateTime.now())),
+            const SizedBox(height: 14),
+            // Незавершённая тренировка важнее всего остального на экране.
+            if (draft != null) ...[
+              _DraftCard(
+                draftWorkout: draft,
+                onOpenDraft: () => _openWorkout(workout: draft),
+                onDelete: _deleteDraft,
               ),
-            );
-          },
+              const SizedBox(height: 10),
+            ],
+            _TodayPlanCard(
+              plan: _plan,
+              loading: _workouts == null,
+              hasDraft: draft != null,
+              templatesLoading: _templatesLoading,
+              aiCoachLoading: _aiCoachLoading,
+              onStartPlan: _startPlan,
+              onStartEmpty: () => _openWorkout(date: DateTime.now()),
+              onStartTemplate: _startFromTemplate,
+              onStartAiCoach: _startFromAiCoach,
+            ),
+            const SizedBox(height: 10),
+            _WeekSummaryCard(summary: _summary),
+            const SizedBox(height: 10),
+            const _NextGoalCard(),
+          ],
         ),
       ),
     );
@@ -1152,98 +888,6 @@ class _TodayScreenState extends State<TodayScreen> {
     ];
     return '${weekdays[date.weekday - 1]}, ${date.day} '
         '${months[date.month - 1].toUpperCase()}';
-  }
-
-  // ── Мышечные тиры ─────────────────────────────────────────────────────────
-
-  static const Set<String> _excludedMuscles = {
-    'предплечья',
-    'кор',
-    'голень',
-  };
-
-  static const Set<String> _tier2Muscles = {
-    'трицепс',
-    'бицепс',
-    'задние_дельты',
-    'трапеции',
-    'пресс',
-  };
-
-  static const Set<String> _tier3Muscles = {'икры'};
-
-  static const Map<String, String> _muscleGroupLabels = {
-    'грудь': 'ГРУДЬ',
-    'широчайшие': 'СПИНА',
-    'трапеции': 'СПИНА',
-    'квадрицепсы': 'НОГИ',
-    'бицепс_бедра': 'НОГИ',
-    'ягодицы': 'НОГИ',
-    'икры': 'НОГИ',
-    'средние_дельты': 'ПЛЕЧИ',
-    'задние_дельты': 'ПЛЕЧИ',
-    'передние_дельты': 'ПЛЕЧИ',
-    'трицепс': 'РУКИ',
-    'бицепс': 'РУКИ',
-    'пресс': 'ПРЕСС',
-  };
-
-  static Set<String> _buildTier1Muscles({
-    String? gender,
-    List<String> goals = const [],
-  }) {
-    final base = <String>{
-      'грудь',
-      'широчайшие',
-      'квадрицепсы',
-      'бицепс_бедра',
-      'ягодицы',
-      'средние_дельты',
-    };
-    if (gender == 'женский' || goals.contains('похудение')) {
-      base.add('пресс');
-    }
-    return base;
-  }
-
-  static int _muscleTier(String muscle, Set<String> tier1) {
-    if (tier1.contains(muscle)) return 1;
-    if (_tier2Muscles.contains(muscle)) return 2;
-    if (_tier3Muscles.contains(muscle)) return 3;
-    return 99;
-  }
-
-  static String _buildRecommendedLabel(List<String> muscles) {
-    final groups = <String>[];
-    final seen = <String>{};
-    for (final muscle in muscles) {
-      final group = _muscleGroupLabels[muscle];
-      if (group != null && seen.add(group)) {
-        groups.add(group);
-        if (groups.length == 2) break;
-      }
-    }
-    return groups.isEmpty ? 'ТРЕНИРОВКА' : groups.join(' И ');
-  }
-
-  // ── Мотивация для старта недели ───────────────────────────────────────────
-
-  static String _goalMotivationHeadline(List<String> goals) {
-    if (goals.contains('масса')) return 'ВРЕМЯ РАСТИ';
-    if (goals.contains('сила')) return 'НЕДЕЛЯ СИЛЫ';
-    if (goals.contains('похудение')) return 'ДВИГАЙСЯ';
-    if (goals.contains('поддержание')) return 'ДЕРЖИ РИТМ';
-    return 'НАЧНИ НЕДЕЛЮ';
-  }
-
-  static String _workoutsPlural(int count) {
-    final mod10 = count % 10;
-    final mod100 = count % 100;
-    if (mod10 == 1 && mod100 != 11) return 'тренировка';
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
-      return 'тренировки';
-    }
-    return 'тренировок';
   }
 }
 
@@ -1379,25 +1023,31 @@ class _TodayHeadline extends StatelessWidget {
   }
 }
 
-class _WorkoutDayCard extends StatelessWidget {
-  const _WorkoutDayCard({
-    required this.headline,
-    required this.focus,
-    required this.dailyInsight,
+/// План на сегодня: фокус по группам мышц, упражнения с весом из прошлой
+/// тренировки и запуск тренировки в один тап. Без LLM — всё считается из
+/// истории.
+class _TodayPlanCard extends StatelessWidget {
+  const _TodayPlanCard({
+    required this.plan,
+    required this.loading,
+    required this.hasDraft,
     required this.templatesLoading,
     required this.aiCoachLoading,
-    required this.onStartWorkout,
+    required this.onStartPlan,
+    required this.onStartEmpty,
     required this.onStartTemplate,
     required this.onStartAiCoach,
   });
 
-  /// Фокус дня от коуча (группы мышц), например «НОГИ И СПИНА».
-  final String? headline;
-  final _TodayFocus? focus;
-  final _DailyInsight? dailyInsight;
+  final TodayPlan? plan;
+  final bool loading;
+
+  /// Есть незавершённая тренировка — главная кнопка уходит на второй план.
+  final bool hasDraft;
   final bool templatesLoading;
   final bool aiCoachLoading;
-  final VoidCallback onStartWorkout;
+  final VoidCallback onStartPlan;
+  final VoidCallback onStartEmpty;
   final VoidCallback onStartTemplate;
   final VoidCallback onStartAiCoach;
 
@@ -1405,92 +1055,215 @@ class _WorkoutDayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final text = dailyInsight?.insight.isNotEmpty == true
-        ? dailyInsight!.insight
-        : (focus?.isStartState == true ? focus?.motivationSubtext : null);
+    final plan = this.plan;
+    final headlineStyle = TextStyle(
+      fontFamily: 'Bebas Neue Cyrillic',
+      fontSize: 30,
+      height: 1.0,
+      letterSpacing: 0.5,
+      color: scheme.onSurface,
+    );
+
+    final buttonStyle = FilledButton.styleFrom(
+      minimumSize: const Size(double.infinity, 54),
+      textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+    );
+    final buttonLabel =
+        Text(plan != null ? 'Начать по плану' : 'Начать тренировку');
+    final onPrimary = plan != null ? onStartPlan : onStartEmpty;
 
     return DashboardCard(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if ((text != null && text.isNotEmpty) || headline != null) ...[
-            Row(
-              children: [
-                Icon(Icons.auto_awesome_rounded,
-                    size: 16, color: scheme.secondary),
-                const SizedBox(width: 6),
-                Text(
-                  dailyInsight != null ? 'AI-КОУЧ' : 'РЕКОМЕНДУЕМ',
-                  style: textTheme.labelSmall?.copyWith(
-                    color: scheme.secondary,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-            if (headline != null) ...[
-              const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.event_note_rounded, size: 16, color: scheme.secondary),
+              const SizedBox(width: 6),
               Text(
-                headline!,
-                style: TextStyle(
-                  fontFamily: 'Bebas Neue Cyrillic',
-                  fontSize: 30,
-                  height: 1.0,
-                  letterSpacing: 0.5,
-                  color: scheme.onSurface,
+                'ПЛАН НА СЕГОДНЯ',
+                style: textTheme.labelSmall?.copyWith(
+                  color: scheme.secondary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
                 ),
               ),
             ],
-            const SizedBox(height: 8),
-            if (text != null && text.isNotEmpty)
-              Text(
-                text,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface.withValues(alpha: 0.85),
-                  height: 1.45,
+          ),
+          const SizedBox(height: 6),
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
-            const SizedBox(height: 14),
+            )
+          else if (plan == null) ...[
+            Text('ПЕРВАЯ ТРЕНИРОВКА', style: headlineStyle),
+            const SizedBox(height: 6),
+            Text(
+              'Записывайте упражнения по ходу — после пары тренировок здесь '
+              'появится план: что пора нагрузить и с каким весом.',
+              style: textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+          ] else ...[
+            Text(plan.headline, style: headlineStyle),
+            const SizedBox(height: 4),
+            Text(
+              _reasonLine(plan.groups),
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            for (final exercise in plan.exercises)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        exercise.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _targetLabel(exercise),
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
+          const SizedBox(height: 14),
+          if (hasDraft)
+            OutlinedButton(
+              onPressed: onPrimary,
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 54),
+                foregroundColor: scheme.primary,
+                side: BorderSide(color: scheme.outlineVariant),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              ),
+              child: buttonLabel,
+            )
+          else
+            FilledButton(
+              onPressed: onPrimary,
+              style: buttonStyle,
+              child: buttonLabel,
+            ),
+          const SizedBox(height: 6),
           Row(
             children: [
-              Expanded(
-                child: FilledButton(
-                  onPressed: onStartWorkout,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 54),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    textStyle: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  child: const FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('Начать тренировку', maxLines: 1),
+              if (plan != null)
+                Expanded(
+                  child: _SecondaryStartButton(
+                    icon: Icons.add_rounded,
+                    label: 'Пустая',
+                    onTap: onStartEmpty,
                   ),
                 ),
+              Expanded(
+                child: _SecondaryStartButton(
+                  icon: Icons.library_books_outlined,
+                  label: 'Шаблон',
+                  loading: templatesLoading,
+                  onTap: onStartTemplate,
+                ),
               ),
-              const SizedBox(width: 10),
-              _IconActionButton(
-                icon: templatesLoading ? null : Icons.library_books_outlined,
-                loading: templatesLoading,
-                tooltip: 'Из шаблона',
-                onTap: templatesLoading ? null : onStartTemplate,
-              ),
-              const SizedBox(width: 10),
-              _IconActionButton(
-                icon: aiCoachLoading ? null : Icons.auto_awesome_outlined,
-                loading: aiCoachLoading,
-                tooltip: 'Собрать с AI',
-                onTap: aiCoachLoading ? null : onStartAiCoach,
+              Expanded(
+                child: _SecondaryStartButton(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'AI-план',
+                  loading: aiCoachLoading,
+                  onTap: onStartAiCoach,
+                ),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  static String _reasonLine(List<PlannedGroup> groups) {
+    final parts = groups
+        .map((group) => '${group.label.toLowerCase()} — '
+            '${_daysLabel(group.daysSince)}')
+        .join(', ');
+    return 'Без нагрузки: $parts';
+  }
+
+  static String _daysLabel(int days) {
+    if (days == 0) return 'тренировали сегодня';
+    final mod10 = days % 10;
+    final mod100 = days % 100;
+    if (mod10 == 1 && mod100 != 11) return '$days день';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+      return '$days дня';
+    }
+    return '$days дней';
+  }
+
+  static String _targetLabel(PlannedExercise exercise) {
+    final volume = '${exercise.sets} × ${exercise.reps}';
+    final weight = exercise.weight;
+    return weight == null ? volume : '$volume · ${formatWeight(weight)} кг';
+  }
+}
+
+class _SecondaryStartButton extends StatelessWidget {
+  const _SecondaryStartButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return TextButton.icon(
+      onPressed: loading ? null : onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: scheme.secondary,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      ),
+      icon: loading
+          ? SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: scheme.secondary,
+              ),
+            )
+          : Icon(icon, size: 18),
+      label: Text(label, maxLines: 1),
     );
   }
 }
@@ -1564,51 +1337,6 @@ class _NextGoalCard extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _IconActionButton extends StatelessWidget {
-  const _IconActionButton({
-    required this.tooltip,
-    required this.onTap,
-    this.icon,
-    this.loading = false,
-  });
-
-  final IconData? icon;
-  final bool loading;
-  final String tooltip;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            border: Border.all(color: scheme.outlineVariant),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Center(
-            child: loading
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: scheme.secondary),
-                  )
-                : Icon(icon, size: 20, color: scheme.secondary),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1782,155 +1510,108 @@ class _DraftCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final startedAt =
+        DateTime.tryParse((draftWorkout['started_at'] ?? '').toString())
+                ?.toLocal() ??
+            DateTime.now();
+    final isToday = DateUtils.isSameDay(startedAt, DateTime.now());
+    final exercises = (draftWorkout['exercises'] as List?)?.length ?? 0;
+    final details = [
+      formatShortDate(startedAt),
+      if (exercises > 0) 'упражнений: $exercises',
+    ].join(' · ');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Dismissible(
-          key: ValueKey(draftWorkout['id'] ?? 'draft_new'),
-          direction: DismissDirection.endToStart,
-          confirmDismiss: (_) => _confirmDelete(context),
-          onDismissed: (_) => onDelete(),
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            decoration: BoxDecoration(
-              color: scheme.errorContainer,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Удалить',
-                  style: TextStyle(
-                    color: scheme.onErrorContainer,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(Icons.delete_outline, color: scheme.onErrorContainer),
-              ],
-            ),
-          ),
-          child: DashboardCard(
-            color: Color.alphaBlend(
-              scheme.primary.withValues(alpha: 0.07),
-              scheme.surfaceContainerLow,
-            ),
-            borderColor: scheme.primary.withValues(alpha: 0.22),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(
-                    Icons.edit_note_rounded,
-                    color: scheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'ЧЕРНОВИК',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: scheme.primary.withValues(alpha: 0.8),
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.4,
-                            ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        (draftWorkout['name'] ?? 'Тренировка').toString(),
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        formatShortDate(
-                          DateTime.tryParse(
-                                (draftWorkout['started_at'] ?? '').toString(),
-                              )?.toLocal() ??
-                              DateTime.now(),
-                        ),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.tonal(
-                  onPressed: onOpenDraft,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    backgroundColor: scheme.primary.withValues(alpha: 0.15),
-                    foregroundColor: scheme.primary,
-                  ),
-                  child: const Text('Продолжить'),
-                ),
-              ],
-            ),
-          ),
+    return Dismissible(
+      key: ValueKey(draftWorkout['id'] ?? 'draft_new'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmDelete(context),
+      onDismissed: (_) => onDelete(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(20),
         ),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+        child: Icon(Icons.delete_outline, color: scheme.onErrorContainer),
+      ),
+      child: DashboardCard(
+        padding: const EdgeInsets.all(16),
+        color: Color.alphaBlend(
+          scheme.primary.withValues(alpha: 0.10),
+          scheme.surfaceContainerLow,
+        ),
+        borderColor: scheme.primary.withValues(alpha: 0.35),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(
-              Icons.swipe_left_outlined,
-              size: 13,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              'Смахните влево, чтобы удалить',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+            Row(
+              children: [
+                Icon(
+                  isToday ? Icons.timer_outlined : Icons.history_rounded,
+                  size: 16,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    isToday ? 'ТРЕНИРОВКА ИДЁТ' : 'НЕ ЗАВЕРШЕНА',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
                   ),
+                ),
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    if (await _confirmDelete(context) == true) onDelete();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              (draftWorkout['name'] ?? 'Тренировка').toString(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              details,
+              style: textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: onOpenDraft,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              child: Text(isToday ? 'Продолжить' : 'Продолжить и завершить'),
             ),
           ],
         ),
-      ],
+      ),
     );
-  }
-}
-
-class _MotivationQuote {
-  const _MotivationQuote({
-    required this.quote,
-    required this.author,
-  });
-
-  final String quote;
-  final String author;
-
-  static _MotivationQuote? tryParse(String line) {
-    final separator = line.lastIndexOf(' — ');
-    if (separator <= 0 || separator >= line.length - 3) {
-      return null;
-    }
-
-    return _MotivationQuote(
-      quote: _trimQuoteEnding(line.substring(0, separator).trim()),
-      author: line.substring(separator + 3).trim(),
-    );
-  }
-
-  static String _trimQuoteEnding(String value) {
-    return value.replaceFirst(RegExp(r'[\s.…。]+$'), '');
   }
 }
 
@@ -1952,87 +1633,6 @@ class _TodaySummary {
   final int activeDays;
   final int weeklyTarget;
   final Set<int> activeWeekdays; // 1=Mon .. 7=Sun
-}
-
-class _TodayFocus {
-  const _TodayFocus.startOfWeek({
-    required this.motivationHeadline,
-    this.motivationSubtext,
-  }) : recommendedLabel = null;
-
-  const _TodayFocus.recommendation({required String this.recommendedLabel})
-      : motivationHeadline = null,
-        motivationSubtext = null;
-
-  final String? recommendedLabel;
-  final String? motivationHeadline;
-  final String? motivationSubtext;
-
-  bool get isStartState => recommendedLabel == null;
-}
-
-class _TodayQuote extends StatelessWidget {
-  const _TodayQuote({
-    required this.quote,
-    required this.author,
-  });
-
-  final String quote;
-  final String author;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final isNarrow = MediaQuery.sizeOf(context).width < 380;
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            width: 4,
-            color: scheme.primary,
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '«$quote»',
-                    style:
-                        (isNarrow ? textTheme.bodyMedium : textTheme.bodyLarge)
-                            ?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      fontStyle: FontStyle.italic,
-                      height: 1.28,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '— $author',
-                    style: textTheme.bodyMedium?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DailyInsight {
-  const _DailyInsight({required this.headline, required this.insight});
-  final String headline;
-  final String insight;
 }
 
 String _normalizeExerciseLookupName(String value) {
