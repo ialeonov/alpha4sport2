@@ -19,6 +19,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+
+  /// Вкладки строятся при первом открытии, а не все сразу на старте:
+  /// так «Прогресс» и «Журнал» не грузят данные, пока их не открыли.
+  final Set<int> _opened = {0};
   bool _announcementChecked = false;
   final _calendarKey = GlobalKey<CalendarScreenState>();
   final _progressKey = GlobalKey<ProgressScreenState>();
@@ -91,7 +95,10 @@ class _HomeScreenState extends State<HomeScreen> {
         child: OfflineBanner(
           child: IndexedStack(
             index: _index,
-            children: pages,
+            children: [
+              for (var i = 0; i < pages.length; i++)
+                _opened.contains(i) ? pages[i] : const SizedBox.shrink(),
+            ],
           ),
         ),
       ),
@@ -108,7 +115,10 @@ class _HomeScreenState extends State<HomeScreen> {
           if (index == 3 && _index != 3) {
             ProgressionController.instance.refresh();
           }
-          setState(() => _index = index);
+          setState(() {
+            _index = index;
+            _opened.add(index);
+          });
         },
         destinations: tabs
             .map(

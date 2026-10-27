@@ -8,8 +8,12 @@ import '../auth/auth_session.dart';
 import '../storage/local_cache.dart';
 import '../storage/offline_queue.dart';
 import 'backend_api_exception.dart';
+import 'request_memo.dart';
 
 class BackendApi {
+  /// Экраны часто просят историю и каталог одновременно — отдаём им
+  /// один запрос. Сбрасывается после изменений и при входе/выходе.
+  static final _memo = RequestMemo();
   static const productionBaseUrl = 'https://fit.ileonov.ru';
   static const developmentBaseUrl = 'http://localhost:8000';
 
@@ -214,6 +218,7 @@ class BackendApi {
         options: Options(contentType: Headers.formUrlEncodedContentType),
       );
       final token = response.data['access_token'] as String;
+      _memo.clear();
       await LocalCache.clearSessionData();
       await LocalCache.put(CacheKeys.baseUrl, normalizedBaseUrl);
       await LocalCache.put(CacheKeys.token, token);
@@ -227,6 +232,7 @@ class BackendApi {
   }
 
   static Future<void> logout() async {
+    _memo.clear();
     await AuthSession.instance.logout();
   }
 
@@ -244,6 +250,7 @@ class BackendApi {
         data: {'email': email, 'password': password},
       );
       final token = response.data['access_token'] as String;
+      _memo.clear();
       await LocalCache.clearSessionData();
       await LocalCache.put(CacheKeys.baseUrl, normalizedBaseUrl);
       await LocalCache.put(CacheKeys.token, token);
@@ -257,7 +264,10 @@ class BackendApi {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> getWorkouts() async {
+  static Future<List<Map<String, dynamic>>> getWorkouts() =>
+      _memo.run('workouts', _fetchWorkouts);
+
+  static Future<List<Map<String, dynamic>>> _fetchWorkouts() async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final response = await dio.get('/api/v1/workouts');
@@ -390,6 +400,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось сохранить тренировку.');
+    } finally {
+      _memo.invalidate('workouts');
     }
   }
 
@@ -437,6 +449,8 @@ class BackendApi {
       }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось сохранить тренировку.');
+    } finally {
+      _memo.invalidate('workouts');
     }
   }
 
@@ -475,6 +489,8 @@ class BackendApi {
       }
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось обновить тренировку.');
+    } finally {
+      _memo.invalidate('workouts');
     }
   }
 
@@ -491,6 +507,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось удалить тренировку.');
+    } finally {
+      _memo.invalidate('workouts');
     }
   }
 
@@ -623,6 +641,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось начать тренировку из шаблона.');
+    } finally {
+      _memo.invalidate('workouts');
     }
   }
 
@@ -659,7 +679,10 @@ class BackendApi {
     );
   }
 
-  static Future<List<Map<String, dynamic>>> getExercises() async {
+  static Future<List<Map<String, dynamic>>> getExercises() =>
+      _memo.run('exercises', _fetchExercises);
+
+  static Future<List<Map<String, dynamic>>> _fetchExercises() async {
     try {
       final dio = _dio(_requiredBaseUrl(), token: _requiredToken());
       final response = await dio.get('/api/v1/exercises');
@@ -715,6 +738,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось создать упражнение.');
+    } finally {
+      _memo.invalidate('exercises');
     }
   }
 
@@ -738,6 +763,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось обновить упражнение.');
+    } finally {
+      _memo.invalidate('exercises');
     }
   }
 
@@ -748,6 +775,8 @@ class BackendApi {
     } on DioException catch (error) {
       _throwFriendlyError(error,
           defaultMessage: 'Не удалось удалить упражнение.');
+    } finally {
+      _memo.invalidate('exercises');
     }
   }
 
