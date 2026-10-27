@@ -1840,7 +1840,11 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                               : 2,
                                         ),
                                         child: _WorkoutSetRow(
-                                          index: setIndex,
+                                          number: exercise.sets
+                                              .take(setIndex + 1)
+                                              .where((s) =>
+                                                  s.setType != 'warmup')
+                                              .length,
                                           set: set,
                                           onChanged: _handleDraftChanged,
                                           onToggleWarmup: () {
@@ -2400,14 +2404,15 @@ class _ExerciseCatalogSheetState extends State<_ExerciseCatalogSheet> {
 
 class _WorkoutSetRow extends StatelessWidget {
   const _WorkoutSetRow({
-    required this.index,
+    required this.number,
     required this.set,
     required this.onChanged,
     required this.onToggleWarmup,
     this.onDelete,
   });
 
-  final int index;
+  /// Номер среди рабочих подходов: разминки не нумеруются.
+  final int number;
   final _SetDraft set;
   final VoidCallback onChanged;
   final VoidCallback onToggleWarmup;
@@ -2465,7 +2470,7 @@ class _WorkoutSetRow extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  isWarmup ? 'Р' : '${index + 1}',
+                  isWarmup ? 'Р' : '$number',
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: fgColor,

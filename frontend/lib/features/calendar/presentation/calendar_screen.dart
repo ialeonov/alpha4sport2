@@ -16,6 +16,7 @@ import '../../workouts/application/workout_export_service.dart';
 import '../../workouts/application/workout_share_service.dart';
 import '../../workouts/domain/workout_metrics.dart';
 import '../../workouts/presentation/workout_form_screen.dart';
+import '../../workouts/presentation/workout_summary_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -459,9 +460,13 @@ class CalendarScreenState extends State<CalendarScreen> {
   }
 
   Future<void> _openEditWorkout(Map<String, dynamic> workout) async {
+    // Завершённая тренировка открывается сводкой, незавершённая — сразу
+    // продолжается.
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => WorkoutFormScreen(initialWorkout: workout),
+        builder: (_) => workout['finished_at'] != null
+            ? WorkoutSummaryScreen(workout: workout)
+            : WorkoutFormScreen(initialWorkout: workout),
       ),
     );
     if (changed == true) {
