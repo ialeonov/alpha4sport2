@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../../core/utils/formatters.dart';
 import '../data/muscle_heatmap_asset_loader.dart';
 import '../domain/muscle_heatmap_color_resolver.dart';
 import '../domain/muscle_heatmap_models.dart';
@@ -9,10 +10,9 @@ import 'body_svg_colorizer.dart';
 
 const double _svgAspectRatio = 597.8 / 608.2;
 
-/// «12 подх.» / «2.5 подх.» — нагрузка в эффективных подходах.
+/// «12 подх.» / «2,5 подх.» — нагрузка в эффективных подходах.
 String formatEffectiveSets(double value) {
-  var text = value >= 10 ? value.round().toString() : value.toStringAsFixed(1);
-  if (text.endsWith('.0')) text = text.substring(0, text.length - 2);
+  final text = value >= 10 ? value.round().toString() : formatDecimal(value);
   return '$text подх.';
 }
 
@@ -304,7 +304,7 @@ class _MuscleTile extends StatelessWidget {
         ? '0'
         : (value >= 10
             ? value.round().toString()
-            : value.toStringAsFixed(1).replaceAll('.0', ''));
+            : formatDecimal(value));
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
       decoration: BoxDecoration(

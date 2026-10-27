@@ -1088,7 +1088,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 96),
                     children: [
                       ScreenHeader(
-                        title: 'Календарь',
+                        title: 'Журнал',
                         subtitle: '$monthLabel · ${_selectedDayLabel()}',
                         actions: [
                           if (isMonthLoading)

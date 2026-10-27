@@ -79,11 +79,11 @@ void main() {
     await tester.pumpWidget(build(1, 80));
     await tester.tap(find.byTooltip('Плюс 2,5 кг'));
     await tester.pump();
-    expect(find.text('82.5'), findsOneWidget);
+    expect(find.text('82,5'), findsOneWidget);
 
     await tester.pumpWidget(build(2, 82.5));
     expect(find.text('Подход 2'), findsOneWidget);
-    expect(find.text('82.5'), findsOneWidget);
+    expect(find.text('82,5'), findsOneWidget);
   });
 
   testWidgets('rest bar appears while the timer runs', (tester) async {

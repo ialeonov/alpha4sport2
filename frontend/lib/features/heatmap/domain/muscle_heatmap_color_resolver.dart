@@ -1,3 +1,4 @@
+import '../../../core/utils/formatters.dart';
 import 'package:flutter/material.dart';
 
 /// Шкала тепловой карты в эффективных подходах.
@@ -41,8 +42,7 @@ class MuscleHeatmapScale {
     return '$from–${_fmt(thresholds[level])}';
   }
 
-  static String _fmt(double v) =>
-      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  static String _fmt(double v) => formatDecimal(v);
 }
 
 class MuscleHeatmapColorResolver {

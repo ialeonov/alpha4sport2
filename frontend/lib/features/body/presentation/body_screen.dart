@@ -577,7 +577,7 @@ class _TrendBadge extends StatelessWidget {
         : isUp
             ? Icons.arrow_upward_rounded
             : Icons.remove_rounded;
-    final sign = isUp ? '+' : '';
+    final sign = isUp ? '+' : (isDown ? '−' : '');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -591,7 +591,7 @@ class _TrendBadge extends StatelessWidget {
           Icon(icon, size: 12, color: color),
           const SizedBox(width: 3),
           Text(
-            '$sign${delta.toStringAsFixed(1)} кг',
+            '$sign${formatDecimal(delta.abs())} кг',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: color,
                   fontWeight: FontWeight.w700,

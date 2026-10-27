@@ -607,9 +607,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
         target = _SetDraft.empty();
         exercise.sets.add(target);
       }
-      target.weightController.text = weight == weight.roundToDouble()
-          ? weight.toInt().toString()
-          : weight.toString();
+      target.weightController.text = formatWeight(weight);
       target.repsController.text = '$reps';
       target.rpe = rpe;
     });
@@ -821,13 +819,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
 
   String _createFingerprint(Map<String, dynamic> draft) => draft.toString();
 
-  double? _parseWeight(String text) {
-    final normalized = text.trim().replaceAll(',', '.');
-    if (normalized.isEmpty) {
-      return null;
-    }
-    return double.tryParse(normalized);
-  }
+  double? _parseWeight(String text) => parseDecimal(text);
 
   List<Map<String, dynamic>>? _buildExercisesPayload({
     bool showValidationError = true,
@@ -1604,7 +1596,7 @@ class _WorkoutFormScreenState extends State<WorkoutFormScreen> {
                                                                             s.setType ==
                                                                             'work')
                                                                         .map((s) =>
-                                                                            double.tryParse(s.weightController.text) ??
+                                                                            parseDecimal(s.weightController.text) ??
                                                                             0.0)
                                                                         .fold(
                                                                             0.0,
@@ -2040,7 +2032,7 @@ class _DoneSetsList extends StatelessWidget {
                 ),
               ),
               Text(
-                '${set.weightController.text} кг × ${set.repsController.text}',
+                '${_displayWeight(set.weightController.text)} кг × ${set.repsController.text}',
                 style: textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: warmup ? scheme.onSurfaceVariant : scheme.onSurface,
@@ -2449,7 +2441,7 @@ class _WorkoutSetRow extends StatelessWidget {
             Builder(builder: (context) {
               final isWarmup = set.setType == 'warmup';
               final isFilled = !isWarmup &&
-                  (double.tryParse(set.weightController.text) ?? 0) > 0 &&
+                  (parseDecimal(set.weightController.text) ?? 0) > 0 &&
                   (int.tryParse(set.repsController.text) ?? 0) > 0;
               final bgColor = isWarmup
                   ? Colors.amber.withValues(alpha: 0.2)
@@ -2661,7 +2653,7 @@ class _RpeChip extends StatelessWidget {
       );
     } else {
       final label =
-          rpe != null ? '@${rpe! % 1 == 0 ? rpe!.toInt() : rpe}' : '@—';
+          rpe != null ? '@${formatDecimal(rpe!)}' : 'RPE';
       child = Text(
         label,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -3085,4 +3077,10 @@ class _TimeField extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Вес из поля для показа в списке подходов: «82,5».
+String _displayWeight(String text) {
+  final value = parseDecimal(text);
+  return value == null ? text : formatWeight(value);
 }

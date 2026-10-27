@@ -1,3 +1,5 @@
+import '../../../core/utils/formatters.dart';
+
 double calculateSetsTonnage(List<dynamic> sets) {
   return sets.fold<double>(0, (sum, rawSet) {
     if (rawSet is! Map) return sum;
@@ -22,27 +24,17 @@ double calculateWorkoutTonnage(Map<String, dynamic> workout) {
   });
 }
 
+/// Тоннаж одинаково везде: «825 кг», «8,2 т».
 String formatTonnage(double kilograms) {
   if (kilograms <= 0) {
     return '0 кг';
   }
 
   if (kilograms >= 1000) {
-    return '${_formatNumber(kilograms / 1000)} т';
+    return '${formatDecimal(kilograms / 1000)} т';
   }
 
-  return '${_formatNumber(kilograms)} кг';
-}
-
-String _formatNumber(double value) {
-  final rounded =
-      value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 2);
-  return rounded
-      .replaceFirstMapped(
-        RegExp(r'([.,]\d*?[1-9])0+$'),
-        (match) => match.group(1) ?? '',
-      )
-      .replaceFirst(RegExp(r'[.,]0+$'), '');
+  return '${kilograms.round()} кг';
 }
 
 double _toDouble(dynamic value) {
