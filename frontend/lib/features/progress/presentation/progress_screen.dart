@@ -6,6 +6,7 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../heatmap/presentation/muscle_volume_view.dart';
 import '../application/progress_analysis_service.dart';
 import '../domain/progress_models.dart';
@@ -72,64 +73,17 @@ _ProgressStats _computeStats(ProgressAnalysisReport report) {
   );
 }
 
-// ── Personal records ─────────────────────────────────────────────────────────
-
-class _RecordEntry {
-  const _RecordEntry({
-    required this.rm1,
-    required this.weight,
-    required this.reps,
-    required this.date,
-  });
-  final double rm1;
-  final double weight;
-  final int reps;
-  final DateTime date;
-}
-
-class _ExerciseRecords {
-  const _ExerciseRecords({required this.name, required this.history});
-  final String name;
-  // history[0] = current record, history[1..2] = previous PRs
-  final List<_RecordEntry> history;
-}
-
-List<_ExerciseRecords> _computeRecords(ProgressAnalysisReport report) {
-  final result = <_ExerciseRecords>[];
-  for (final ex in report.allExercises) {
-    if (ex.sessions.isEmpty) continue;
-    final prs = <_RecordEntry>[];
-    double maxWeight = 0;
-    for (final s in ex.sessions) {
-      final w = s.workingSet.weight;
-      if (w > maxWeight) {
-        maxWeight = w;
-        prs.add(_RecordEntry(
-          rm1: s.workingSet.estimated1rm,
-          weight: w,
-          reps: s.workingSet.reps,
-          date: s.performedAt,
-        ));
-      }
-    }
-    if (prs.isEmpty) continue;
-    final recent = prs.reversed.take(3).toList();
-    result.add(_ExerciseRecords(name: ex.exerciseName, history: recent));
-  }
-  result.sort((a, b) => b.history.first.date.compareTo(a.history.first.date));
-  return result;
-}
-
 // ── Filter tab ───────────────────────────────────────────────────────────────
 
 enum _FilterTab { all, increase, keep, attention }
 
 /// Вкладки экрана «Прогресс».
-enum ProgressTab { recommendations, muscles, records }
+enum ProgressTab { recommendations, muscles }
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
-/// Единый экран прогресса: рекомендации по весам, объём по мышцам и рекорды.
+/// Единый экран прогресса: рекомендации по весам и объём по мышцам.
+/// Рекорды — в профиле.
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({
     super.key,
@@ -347,7 +301,6 @@ class ProgressScreenState extends State<ProgressScreen>
           catalog: data.catalog,
           onRefresh: refresh,
         ),
-        _RecordsTab(report: data.report, onRefresh: refresh),
       ],
     );
   }
@@ -404,7 +357,6 @@ class _StyledTabBar extends StatelessWidget {
         tabs: const [
           Tab(text: 'Веса'),
           Tab(text: 'Мышцы'),
-          Tab(text: 'Рекорды'),
         ],
       ),
     );
@@ -512,6 +464,9 @@ class _AiSummaryCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return DashboardCard(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AiCoachScreen()),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -548,6 +503,14 @@ class _AiSummaryCard extends StatelessWidget {
                         height: 1.45,
                       ),
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  'Спросить коуча →',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
               ],
             ),
           ),
@@ -556,50 +519,6 @@ class _AiSummaryCard extends StatelessWidget {
     );
   }
 }
-
-// ── Records tab ───────────────────────────────────────────────────────────────
-
-class _RecordsTab extends StatelessWidget {
-  const _RecordsTab({
-    required this.report,
-    required this.onRefresh,
-  });
-
-  final ProgressAnalysisReport report;
-  final Future<void> Function() onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    final records = _computeRecords(report);
-
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
-        children: [
-          if (records.isEmpty)
-            DashboardCard(
-              child: Text(
-                report.allExercises.isEmpty
-                    ? 'Недостаточно истории для рекордов.'
-                    : 'Личных рекордов пока нет.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          else
-            ...records.map(
-              (r) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _RecordCard(record: r),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Distribution bar ──────────────────────────────────────────────────────────
 
 class _DistributionBar extends StatelessWidget {
   const _DistributionBar({required this.stats});
@@ -861,127 +780,6 @@ class _FilterChip extends StatelessWidget {
 }
 
 // ── Record card ───────────────────────────────────────────────────────────────
-
-class _RecordCard extends StatelessWidget {
-  const _RecordCard({required this.record});
-  final _ExerciseRecords record;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final current = record.history.first;
-    final prev = record.history.skip(1).toList();
-    const gold = Color(0xFFFFD700);
-
-    return DashboardCard(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  record.name,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                formatShortDate(current.date),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: gold.withValues(alpha: 0.12),
-                  border: Border.all(color: gold.withValues(alpha: 0.45)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _formatWeight(current.weight),
-                      style: const TextStyle(
-                        fontFamily: 'Bebas Neue Cyrillic',
-                        fontSize: 42,
-                        color: Color(0xFFFFD700),
-                        height: 1,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4, bottom: 4),
-                      child: Text(
-                        'кг × ${current.reps}',
-                        style:
-                            Theme.of(context).textTheme.labelMedium?.copyWith(
-                                  color: gold.withValues(alpha: 0.75),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (prev.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            ...prev.map(
-              (e) => Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.history_rounded,
-                      size: 13,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${_formatWeight(e.weight)} кг × ${e.reps}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '· ${formatShortDate(e.date)}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color:
-                                scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ── Exercise detail card ──────────────────────────────────────────────────────
 
 class _ExerciseDetailCard extends StatelessWidget {
   const _ExerciseDetailCard({required this.analysis});

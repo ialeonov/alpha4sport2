@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../events/presentation/account_events_screen.dart';
-import '../../progression/presentation/progression_profile_screen.dart';
 import '../../users/presentation/users_screen.dart';
 
 class SocialHubScreen extends StatelessWidget {
@@ -12,7 +11,7 @@ class SocialHubScreen extends StatelessWidget {
     final theme = Theme.of(context);
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Сообщество'),
@@ -27,7 +26,6 @@ class SocialHubScreen extends StatelessWidget {
             ),
             labelPadding: const EdgeInsets.symmetric(horizontal: 16),
             tabs: const [
-              Tab(text: 'Профиль'),
               Tab(text: 'Пользователи'),
               Tab(text: 'События'),
             ],
@@ -35,7 +33,6 @@ class SocialHubScreen extends StatelessWidget {
         ),
         body: const TabBarView(
           children: [
-            ProgressionProfileContent(),
             UsersScreen(),
             AccountEventsScreen(),
           ],

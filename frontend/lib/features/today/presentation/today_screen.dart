@@ -10,6 +10,7 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../progression/application/progression_controller.dart';
 import '../../workouts/domain/set_target.dart';
 import '../domain/today_plan.dart';
@@ -856,6 +857,9 @@ class _TodayScreenState extends State<TodayScreen> {
               onStartEmpty: () => _openWorkout(date: DateTime.now()),
               onStartTemplate: _startFromTemplate,
               onStartAiCoach: _startFromAiCoach,
+              onAskCoach: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiCoachScreen()),
+              ),
             ),
             const SizedBox(height: 10),
             _WeekSummaryCard(summary: _summary),
@@ -1042,6 +1046,7 @@ class _TodayPlanCard extends StatelessWidget {
     required this.onStartEmpty,
     required this.onStartTemplate,
     required this.onStartAiCoach,
+    required this.onAskCoach,
   });
 
   final TodayPlan? plan;
@@ -1055,6 +1060,7 @@ class _TodayPlanCard extends StatelessWidget {
   final VoidCallback onStartEmpty;
   final VoidCallback onStartTemplate;
   final VoidCallback onStartAiCoach;
+  final VoidCallback onAskCoach;
 
   @override
   Widget build(BuildContext context) {
@@ -1092,6 +1098,33 @@ class _TodayPlanCard extends StatelessWidget {
                   color: scheme.secondary,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.2,
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                onTap: onAskCoach,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 14,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Спросить коуча',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

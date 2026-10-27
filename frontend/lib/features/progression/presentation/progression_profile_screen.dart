@@ -24,7 +24,17 @@ class ProgressionProfileScreen extends StatelessWidget {
 }
 
 class ProgressionProfileContent extends StatefulWidget {
-  const ProgressionProfileContent({super.key});
+  const ProgressionProfileContent({
+    super.key,
+    this.header,
+    this.footer = const [],
+  });
+
+  /// Над шапкой профиля (например, заголовок экрана).
+  final Widget? header;
+
+  /// После всех секций прогресса (например, меню настроек).
+  final List<Widget> footer;
 
   @override
   State<ProgressionProfileContent> createState() =>
@@ -217,18 +227,26 @@ class _ProgressionProfileContentState
           final ctrl = ProgressionController.instance;
           final profile = ctrl.profile;
 
-          if (ctrl.isLoading && profile == null) {
-            return const Center(child: CircularProgressIndicator());
-          }
           if (profile == null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  ctrl.error ?? 'Не удалось загрузить профиль прогресса.',
-                  textAlign: TextAlign.center,
+            // Шапка и меню (настройки, выход) доступны и без профиля.
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
+              children: [
+                if (widget.header != null) widget.header!,
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: ctrl.isLoading
+                        ? const CircularProgressIndicator()
+                        : Text(
+                            ctrl.error ??
+                                'Не удалось загрузить профиль прогресса.',
+                            textAlign: TextAlign.center,
+                          ),
+                  ),
                 ),
-              ),
+                ...widget.footer,
+              ],
             );
           }
 
@@ -237,6 +255,10 @@ class _ProgressionProfileContentState
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
               children: [
+                if (widget.header != null) ...[
+                  widget.header!,
+                  const SizedBox(height: 12),
+                ],
                 // ── Шапка профиля ──────────────────────────────────────
                 _ProfileHeader(
                   profile: profile,
@@ -331,6 +353,7 @@ class _ProgressionProfileContentState
                   onPickSickLeave: _pickSickLeave,
                   onCancelSickLeave: _cancelSickLeave,
                 ),
+                ...widget.footer,
               ],
             ),
           );

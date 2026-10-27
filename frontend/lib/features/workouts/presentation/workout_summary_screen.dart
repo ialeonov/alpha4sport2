@@ -5,6 +5,7 @@ import '../../../core/storage/local_cache.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/athletic_ui.dart';
+import '../../coach/presentation/ai_coach_screen.dart';
 import '../../heatmap/data/heatmap_reference_workouts.dart';
 import '../../heatmap/domain/muscle_load_calculator.dart';
 import '../../heatmap/presentation/muscle_heatmap_card.dart';
@@ -69,6 +70,16 @@ class _WorkoutSummaryScreenState extends State<WorkoutSummaryScreen> {
       ),
     );
     if (changed == true && mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _askCoach(DateTime startedAt) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiCoachScreen(
+          initialMessage: 'Разбери тренировку от ${formatShortDate(startedAt)}',
+        ),
+      ),
+    );
   }
 
   Future<void> _share() {
@@ -176,6 +187,15 @@ class _WorkoutSummaryScreenState extends State<WorkoutSummaryScreen> {
             const DashboardSectionLabel('Нагрузка на мышцы'),
             const SizedBox(height: 8),
             MuscleHeatmapCard(loads: loads, showHeader: false),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: startedAt == null ? null : () => _askCoach(startedAt),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              icon: const Icon(Icons.chat_bubble_outline_rounded),
+              label: const Text('Разобрать с коучем'),
+            ),
           ],
         ),
       ),
